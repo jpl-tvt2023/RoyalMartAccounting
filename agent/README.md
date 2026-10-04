@@ -17,7 +17,7 @@ Node 20+. `npm install`, then `npm test` runs the suites against a mock Tally.
 |---|---|---|
 | `node src/cli.js ping` | Tally PC | Checks that Tally answers, and lists the open companies. |
 | `node src/cli.js companies` | Tally PC | Lists the open companies with their `AltVchId`/`AltMstId` counters. |
-| `node src/cli.js probe --from 2026-04-01` | Tally PC | Pulls masters and the Day Book, month by month, from every open company. Writes a probe folder with `profile.md`. |
+| `node src/cli.js probe --from 2026-04-01` | Tally PC | Pulls masters and vouchers, month by month, from every open company. Writes a probe folder with `profile.md`. |
 | `node src/cli.js record …` | Tally PC | Same as `probe`, plus every raw request/response, which the mock can replay. |
 | `node src/cli.js roms-refs --roms-env "<ROMS>/backend/.env"` | dev PC | Reads ROMS PO, RTV and SKU references with SELECTs only. Writes JSON and a summary that includes the go-live date to use as `--from`. |
 | `node src/cli.js analyze --probe <dir> --refs <json>` | dev PC | Compares ROMS with Tally and writes `analysis.md`, the decision gate. |
@@ -34,7 +34,7 @@ Tally connection options: `--host`, `--port`, `--timeout <s>` (default 300), `--
 2. Turn the server on: F1 → Settings → Connectivity → *acts as* Both, port 9000.
 3. Create three small companies set up like the accountant's.
 
-Educational mode only accepts voucher dates on the 1st, 2nd and 31st.
+Educational mode only accepts dates on the 1st, 2nd and 31st, for export periods as well as voucher entry. The probe widens each month to such dates and drops what falls outside, so Educational mode still gives complete data.
 
 **C. Copy of the real books.**
 1. On the office PC, run Data → Backup for each of the three companies.

@@ -9,7 +9,7 @@ const { createMockTally, syntheticAnswer } = require('../mock/server');
 const { buildDataset } = require('../mock/dataset');
 const xml = require('../mock/xml');
 const { createTallyClient } = require('../src/tally/client');
-const { describeRequest } = require('../src/tally/requests');
+const { describeRequest, vouchersRequest, VOUCHER_COLLECTION } = require('../src/tally/requests');
 const { runProbe } = require('../src/probe');
 const { analyze, renderAnalysis } = require('../src/analyze');
 
@@ -120,7 +120,7 @@ describe('probe resilience', () => {
         if (req.method === 'GET') return res.end('<RESPONSE>TallyPrime Server is Running</RESPONSE>');
         const body = Buffer.concat(chunks).toString('utf16le');
         const d = describeRequest(body);
-        const fail = d.id === 'DayBook' && /HR$/.test(d.company) && d.from === '2026-05-01';
+        const fail = d.id === VOUCHER_COLLECTION && /HR$/.test(d.company) && d.from === '2026-05-01';
         return res.end(fail ? xml.errorXml('Memory Access Violation') : syntheticAnswer(dataset, body));
       });
     });
@@ -131,6 +131,38 @@ describe('probe resilience', () => {
     expect(hr.periods.find((p) => p.from === '2026-05-01').error).toMatch(/Memory Access Violation/);
     expect(run.companies.find((c) => /WB$/.test(c.name)).vouchers).toBe(1); // later companies still probed
     expect(profile.companies.find((p) => p.code === 'HR').warnings[0]).toMatch(/^Export error/);
+  });
+
+  test('a Tally that ignores the requested period is caught, not counted', async () => {
+    // Educational-mode TallyPrime swaps a date it won't accept for another.
+    const dataset = buildDataset();
+    const server = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        if (req.method === 'GET') return res.end('<RESPONSE>TallyPrime Server is Running</RESPONSE>');
+        const body = Buffer.concat(chunks).toString('utf16le');
+        const d = describeRequest(body);
+        const stuck = d.id === VOUCHER_COLLECTION ? vouchersRequest({ company: d.company, from: '2026-04-01', to: '2026-04-30' }) : body;
+        return res.end(syntheticAnswer(dataset, stuck));
+      });
+    });
+    const { run } = await probeOnce(server, { outDir: tmp('stuck') });
+    const wb = run.companies.find((c) => /WB$/.test(c.name));
+    expect(wb.vouchers).toBe(1); // WB's one voucher, 15 Apr, counted once
+    expect(wb.errors).toHaveLength(2); // May and June each got April's book
+    expect(wb.errors[0]).toMatch(/^Vouchers 2026-05-01…2026-05-31: Tally sent 1 dated outside .* it ignored the period/);
+  });
+
+  test('a widened period neither leaks outside --from/--to nor counts a voucher twice', async () => {
+    const outDir = tmp('edges');
+    // Asks Tally for 1 Apr…1 May and 1 May…2 May; MH has 4 Apr vouchers from the 5th on, 1 on 2 May.
+    const { run } = await probeOnce(createMockTally({ dataset: buildDataset() }), { outDir, from: '2026-04-05', to: '2026-05-02' });
+    const mh = run.companies.find((c) => /MH$/.test(c.name));
+    expect(mh.errors).toEqual([]);
+    expect(mh.periods.map((p) => p.vouchers)).toEqual([4, 1]);
+    const lines = fs.readFileSync(path.join(outDir, 'companies', mh.slug, 'vouchers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    expect(lines.map((v) => v.date).sort()).toEqual(['2026-04-05', '2026-04-10', '2026-04-12', '2026-04-15', '2026-05-02']);
   });
 
   test('--company that matches nothing is reported, not silently ignored', async () => {

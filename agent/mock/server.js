@@ -21,9 +21,10 @@ const UNKNOWN = '<RESPONSE>Unknown Request, cannot be processed</RESPONSE>';
 function syntheticAnswer(dataset, body) {
   const d = describeRequest(body);
   if (/^collection$/i.test(d.type) && /compan/i.test(d.id)) return xml.companiesXml(dataset.companies);
-  if (!/^(list of accounts|daybook|day book)$/i.test(d.id)) return UNKNOWN;
+  if (!/^(list of accounts|daybook|day book|rams vouchers)$/i.test(d.id)) return UNKNOWN;
   const company = dataset.companies.find((c) => c.name.toLowerCase() === d.company.toLowerCase());
   if (!company) return xml.errorXml(`Could not set 'SVCurrentCompany' to '${d.company}'`);
+  // The voucher collection holds the same VOUCHER objects as a Day Book.
   return /list of accounts/i.test(d.id) ? xml.mastersXml(company, d.accountType) : xml.dayBookXml(company, d.from, d.to);
 }
 
