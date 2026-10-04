@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/* RAMS's own accent on the ROMS layout, so the two apps are never mistaken
+   for each other at a glance. Use these tokens (bg-brand, text-brand,
+   hover:bg-brand-hover, bg-brand-surface, text-danger, ...) rather than raw
+   hex values -- ROMS hardcodes its colours, RAMS does not. */
+@theme {
+  --color-brand: #1b4332;          /* deep green: top bar, headings, primary actions */
+  --color-brand-hover: #2d6a4f;
+  --color-brand-surface: #f0f7f2;  /* sign-in background, subtle fills */
+  --color-brand-accent: #e19f3e;   /* amber, shared with ROMS: warnings, highlights */
+  --color-danger: #c1121f;         /* Royal Mart red: destructive actions, errors */
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background-color: #f9fafb;
+    color: #111827;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    width: 100%;
+    min-height: 100vh;
+  }
+}
