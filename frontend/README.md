@@ -14,6 +14,8 @@ npm run lint       # must stay clean; CI runs it
 
 Start the backend first (see `../backend/README.md`). RAMS has its own sign-in, separate from ROMS.
 
+On Vercel this is the `frontend` service in the root `vercel.json`. That file also holds the page-refresh rule (unknown paths serve `index.html`) and the security headers (CSP and others). The API is on the same domain under `/api`, so the app calls it as `/api` and needs no `VITE_API_BASE_URL`.
+
 ## Conventions
 
 - **Colours are `@theme` tokens** in `src/index.css`: `bg-brand`, `hover:bg-brand-hover`, `bg-brand-surface`, `text-danger`, `text-brand-accent`. Use the tokens rather than raw hex values.
