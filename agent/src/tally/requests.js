@@ -9,10 +9,12 @@
 //   masters     The built-in "List of Accounts" report, one AccountType at a
 //               time (Groups, Ledgers, Stock Items, Voucher Types). Exports
 //               whole master objects.
-//   dayBook     The built-in "DayBook" report for a date range. Exports whole
+//   vouchers    Collection export of the vouchers in a period. Exports whole
 //               voucher objects — ledger lines, inventory lines, bill
 //               allocations, order details — which is what Phase 0 needs to
 //               discover where the accountant actually keeps each number.
+//               (The built-in DayBook report would be simpler, but TallyPrime
+//               7.1 exports it for one day only, whatever range is asked.)
 const { parseXml, findAll, txt } = require('./parse');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -20,11 +22,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const esc = (s) => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// '2026-04-01' → '1-Apr-2026', the form Tally's own samples use.
+// '2026-04-01' → '20260401'. TallyPrime 7.1's DayBook ignored '1-Apr-2026'
+// (the form Tally's older samples use) but took this one.
 function tallyDateArg(isoDate) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate || '');
   if (!m) throw new Error(`Bad date ${isoDate} (use YYYY-MM-DD)`);
-  return `${Number(m[3])}-${MONTHS[Number(m[2]) - 1]}-${m[1]}`;
+  return `${m[1]}${m[2]}${m[3]}`;
 }
 
 // Either form Tally accepts, back to ISO: '1-Apr-2026' or '20260401'.
@@ -83,12 +86,39 @@ function mastersRequest({ company, accountType }) {
   });
 }
 
-function dayBookRequest({ company, from, to }) {
+const VOUCHER_COLLECTION = 'RAMS Vouchers';
+// NATIVEMETHOD * brings every plain field; sub-lists come only when fetched
+// by name. Checked against DayBook on TallyPrime 7.1: every document field it
+// exports is here too, and invoices also carry their accounting-view lines.
+const VOUCHER_LISTS = [
+  'AllLedgerEntries', 'LedgerEntries', 'AllInventoryEntries', 'InventoryEntries',
+  'InventoryEntriesIn', 'InventoryEntriesOut', 'InvoiceOrderList', 'InvoiceDelNotes',
+  'Address', 'BasicBuyerAddress', 'EwayBillDetails', 'GST', 'OrigInvoiceDetails',
+];
+
+function vouchersRequest({ company, from, to }) {
   return envelope({
-    type: 'Data',
-    id: 'DayBook',
+    type: 'Collection',
+    id: VOUCHER_COLLECTION,
     vars: { SVCURRENTCOMPANY: company, SVFROMDATE: from, SVTODATE: to },
+    tdl: `<COLLECTION NAME="${VOUCHER_COLLECTION}" ISMODIFY="No"><TYPE>Voucher</TYPE>`
+      + `<FETCH>${VOUCHER_LISTS.join(', ')}</FETCH><NATIVEMETHOD>*</NATIVEMETHOD></COLLECTION>`,
   });
+}
+
+// TallyPrime in Educational mode accepts only the 1st, 2nd and 31st as dates,
+// export periods included; any other date is silently swapped for the last one
+// it accepted. So a period is widened outward to such dates, and the probe
+// drops what falls outside the period it wanted.
+const EDU_DAYS = new Set([1, 2, 31]);
+function eduSafeRange(from, to) {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  const firstOf = (y, m) => `${y}-${String(m).padStart(2, '0')}-01`;
+  return {
+    from: EDU_DAYS.has(fd) ? from : firstOf(fy, fm),
+    to: EDU_DAYS.has(td) ? to : (tm === 12 ? firstOf(ty + 1, 1) : firstOf(ty, tm + 1)),
+  };
 }
 
 // What a request asks for, read back from its XML. The mock Tally routes on
@@ -113,6 +143,6 @@ function describeRequest(xml) {
 }
 
 module.exports = {
-  tallyDateArg, isoFromTally, envelope, companiesRequest, mastersRequest, dayBookRequest,
-  describeRequest, MASTER_TYPES, COMPANY_COLLECTION,
+  tallyDateArg, isoFromTally, envelope, companiesRequest, mastersRequest, vouchersRequest, eduSafeRange,
+  describeRequest, MASTER_TYPES, COMPANY_COLLECTION, VOUCHER_COLLECTION,
 };

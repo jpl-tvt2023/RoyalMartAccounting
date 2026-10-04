@@ -30,6 +30,22 @@ function splitRefs(value) {
   return String(value ?? '').split(/\s*[,;]\s*|\s+&\s+|\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
 }
 
+// The running serial of a voucher number: its one all-digit '/'-segment.
+// 607/RM/26-27 → '607', RM/26-27/012 → '012', 4 → '4'; none or several → ''.
+// Staff type just this into ROMS ('607', sometimes '0607').
+function serialOf(number) {
+  const digits = String(number ?? '').split('/').map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+  return digits.length === 1 ? digits[0] : '';
+}
+
+// A PO number with a label after a spaced dash, as ROMS holds Zepto's:
+// 'P4588464- Dry', 'P5120874 - SS' → 'P4588464', 'P5120874'. A dash inside
+// the number ('ZPO-778812') is left alone; '' when there is no label.
+function withoutLabel(value) {
+  const m = /^(.*?\S)\s*(?:\s-|-\s)\s*[A-Za-z]+$/.exec(String(value ?? '').trim());
+  return m ? m[1] : '';
+}
+
 // The shape of a number: letters → A, digits → 9. RM/26-27/012 → AA/99-99/999.
 const mask = (s) => String(s ?? '').trim().replace(/[A-Za-z]/g, 'A').replace(/[0-9]/g, '9');
 
@@ -43,6 +59,9 @@ function howTyped(romsValue, tallyValue) {
   if (exactKey(r) === exactKey(t).replace(/[^A-Z0-9-]/g, '')) return "'/' left out";
   if (normKey(r) === normKey(t)) return 'separators or leading zeros differ';
   if (compactKey(r) === compactKey(t)) return 'all separators left out';
+  const serial = serialOf(t);
+  if (serial && r === serial) return 'serial only';
+  if (serial && /^\d+$/.test(r) && normKey(r) === normKey(serial)) return 'serial only, leading zeros differ';
   return 'other';
 }
 
@@ -74,4 +93,4 @@ class DocIndex {
   }
 }
 
-module.exports = { exactKey, normKey, compactKey, splitRefs, mask, howTyped, DocIndex, LEVELS };
+module.exports = { exactKey, normKey, compactKey, splitRefs, serialOf, withoutLabel, mask, howTyped, DocIndex, LEVELS };

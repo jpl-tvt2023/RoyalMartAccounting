@@ -1,9 +1,9 @@
 const { sanitize, parseXml, txt, field, num, tallyDate, findAll } = require('../src/tally/parse');
 const {
-  exactKey, normKey, compactKey, splitRefs, mask, howTyped, DocIndex,
+  exactKey, normKey, compactKey, splitRefs, serialOf, withoutLabel, mask, howTyped, DocIndex,
 } = require('../src/docno');
 const {
-  tallyDateArg, isoFromTally, companiesRequest, mastersRequest, dayBookRequest, describeRequest,
+  tallyDateArg, isoFromTally, companiesRequest, mastersRequest, vouchersRequest, eduSafeRange, describeRequest, VOUCHER_COLLECTION,
 } = require('../src/tally/requests');
 const {
   baseTypeResolver, groupResolver, ledgersFrom, voucherFrom, GSTIN_RE, panOf,
@@ -54,7 +54,22 @@ describe('docno', () => {
     expect(howTyped('RM26-27001', 'RM/26-27/001')).toBe("'/' left out");
     expect(howTyped('RM2627001', 'RM/26-27/001')).toBe('all separators left out');
     expect(howTyped('RM-26-27-1', 'RM/26-27/001')).toBe('separators or leading zeros differ');
+    expect(howTyped('607', '607/RM/26-27')).toBe('serial only');
+    expect(howTyped('0601', '601/RM/26-27')).toBe('serial only, leading zeros differ');
+    expect(howTyped('1819', '1219/RM/26-27')).toBe('other');
     expect(howTyped('XYZ', 'RM/26-27/001')).toBe('other');
+  });
+
+  test('serial of a voucher number, and a PO number without its label', () => {
+    expect(serialOf('607/RM/26-27')).toBe('607');
+    expect(serialOf('RM/26-27/012')).toBe('012');
+    expect(serialOf('4')).toBe('4');
+    expect(serialOf('RM/26-27')).toBe('');
+    expect(serialOf('12/RM/34')).toBe(''); // two candidates: no guess
+    expect(withoutLabel('P4588464- Dry')).toBe('P4588464');
+    expect(withoutLabel('P5120874 - SS')).toBe('P5120874');
+    expect(withoutLabel('ZPO-778812')).toBe('');
+    expect(withoutLabel('P4741737')).toBe('');
   });
 
   test('DocIndex answers at the strongest level with a hit, and ignores tiny compact keys', () => {
@@ -77,7 +92,7 @@ describe('docno', () => {
 
 describe('requests', () => {
   test('date forms', () => {
-    expect(tallyDateArg('2026-04-01')).toBe('1-Apr-2026');
+    expect(tallyDateArg('2026-04-01')).toBe('20260401');
     expect(isoFromTally('1-Apr-2026')).toBe('2026-04-01');
     expect(isoFromTally('20260401')).toBe('2026-04-01');
     expect(() => tallyDateArg('01/04/2026')).toThrow();
@@ -85,13 +100,20 @@ describe('requests', () => {
 
   test('every request is an export and reads back to what it asks for', () => {
     const company = 'Roymax & Sons <MH>';
-    for (const r of [companiesRequest(), mastersRequest({ company, accountType: 'Ledgers' }), dayBookRequest({ company, from: '2026-04-01', to: '2026-04-30' })]) {
+    for (const r of [companiesRequest(), mastersRequest({ company, accountType: 'Ledgers' }), vouchersRequest({ company, from: '2026-04-01', to: '2026-04-30' })]) {
       expect(r).toContain('<TALLYREQUEST>Export</TALLYREQUEST>');
       expect(r).not.toMatch(/Import|Create|Alter|Delete/i);
     }
     expect(describeRequest(mastersRequest({ company, accountType: 'Ledgers' }))).toMatchObject({ id: 'List of Accounts', company, accountType: 'Ledgers' });
-    expect(describeRequest(dayBookRequest({ company, from: '2026-04-01', to: '2026-04-30' }))).toMatchObject({ id: 'DayBook', company, from: '2026-04-01', to: '2026-04-30' });
+    expect(describeRequest(vouchersRequest({ company, from: '2026-04-01', to: '2026-04-30' }))).toMatchObject({ type: 'Collection', id: VOUCHER_COLLECTION, company, from: '2026-04-01', to: '2026-04-30' });
     expect(describeRequest(companiesRequest()).type).toBe('Collection');
+  });
+
+  test('periods are widened to dates Educational mode accepts (1st, 2nd, 31st)', () => {
+    expect(eduSafeRange('2026-06-08', '2026-06-30')).toEqual({ from: '2026-06-01', to: '2026-07-01' });
+    expect(eduSafeRange('2026-07-01', '2026-07-31')).toEqual({ from: '2026-07-01', to: '2026-07-31' });
+    expect(eduSafeRange('2026-07-02', '2026-07-02')).toEqual({ from: '2026-07-02', to: '2026-07-02' });
+    expect(eduSafeRange('2026-12-05', '2026-12-30')).toEqual({ from: '2026-12-01', to: '2027-01-01' });
   });
 });
 

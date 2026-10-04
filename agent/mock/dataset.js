@@ -15,6 +15,9 @@
 //   CN/26-27/001  Agst Ref RM/26-27/001, RTV CN blank → fillable
 //   CN/26-27/002  ROMS RTV typed 'CN-26-27-002'
 //   DN/26-27/001  carries GRN Discrepancy Number ZDN-4410 in REFERENCE
+//   612/RM/26-27  the real MH shape: ROMS Z009 typed just the serial ('0612'),
+//                 holds the PO as 'ZPO-778860- Dry', and the item is named
+//                 with Zepto's product code
 const GSTIN = { MH: '27ABGFR0562B1ZI', HR: '06ABGFR0562B1ZM', WB: '19ABGFR0562B1ZF' };
 
 const NAMES = {
@@ -40,6 +43,10 @@ const GROUPS = [
 const RESERVED_TYPES = ['Sales', 'Purchase', 'Receipt', 'Payment', 'Journal', 'Contra', 'Credit Note', 'Debit Note', 'Delivery Note', 'Stock Journal']
   .map((name) => ({ name, parent: name, reserved: name }));
 
+// Named the way the accountant really names items: SKU-ish prefix plus the
+// marketplace's product code (here Zepto 50012345 → RMB-YEL-01 in ROMS).
+const YELLOW = 'RMBYEL01001 ITEM CODE-50012345 PID-77';
+
 const STOCK_ITEMS = [
   { name: 'RMB-RED-01', parent: 'Bandanas', hsn: '6214' },
   { name: 'RMB-BLU-01', parent: 'Bandanas', hsn: '6214' },
@@ -47,6 +54,7 @@ const STOCK_ITEMS = [
   { name: 'RMS-BLK-L', parent: 'Full Socks', hsn: '6115' },
   { name: 'rmh-wht-6p', parent: 'Handkerchiefs', hsn: '6213' },
   { name: 'Bandana Mix Old', parent: 'Bandanas' },
+  { name: YELLOW, parent: 'Bandanas', hsn: '6214' },
 ];
 
 const COMMON_LEDGERS = [
@@ -158,6 +166,7 @@ function buildDataset() {
       invoice({ type: 'Sales', date: '2026-03-15', number: 'Z/001', party: ZEPTO, orders: [{ no: 'ZPO-700001', date: '2026-03-12' }], items: [{ item: 'RMB-RED-01', qty: 10, rate: 50 }] }),
       invoice({ type: 'Sales', date: '2026-04-15', number: 'Z/001', party: ZEPTO, orders: [{ no: 'ZPO-778830', date: '2026-04-12' }], items: [{ item: 'RMB-RED-01', qty: 12, rate: 50 }] }),
       invoice({ type: 'Sales', date: '2026-05-12', number: 'RM/26-27/010', party: ZEPTO, orders: [{ no: 'ZPO-778840', date: '2026-05-09' }], items: [{ item: 'RMB-BLU-01', qty: 8, rate: 50 }] }),
+      invoice({ type: 'Sales', date: '2026-06-03', number: '612/RM/26-27', party: ZEPTO, orders: [{ no: 'ZPO-778860', date: '2026-06-01' }], items: [{ item: YELLOW, qty: 25, rate: 50 }] }),
     ],
   };
 
@@ -222,7 +231,7 @@ function romsRefs() {
     vendors: ['Amazon', 'Blinkit', 'Flipkart', 'Minutes', 'Now', 'Scootsy', 'Zepto'].map((name) => ({ name, is_active: 1 })),
     products: ['RMB-RED-01', 'RMB-BLU-01', 'RMB-GRN-01', 'RMS-BLK-L', 'RMH-WHT-6P', 'RMB-YEL-01']
       .map((sku_code, i) => ({ id: i + 1, sku_code, description: null, category: null })),
-    vendorCodes: [],
+    vendorCodes: [{ vendor: 'Zepto', vendor_item_code: '50012345', sku_code: 'RMB-YEL-01' }],
     pos: [
       po({ po_id: 'Z001', vendor: 'Zepto', vendor_po_id: 'ZPO-778812', po_date: '2026-04-02', status: 'Closed', bill_no: 'RM-26-27-001', bill_date: '2026-04-05', grn_status: 'Delivered - GRN Received', discrepancy_qty: 5, discrepancy_number: 'ZDN-4410' }),
       po({ po_id: 'Z002', vendor: 'Zepto', vendor_po_id: 'ZPO-778813', po_date: '2026-04-08', bill_no: 'RM-26-27-002', bill_date: '2026-04-10' }),
@@ -235,6 +244,7 @@ function romsRefs() {
       po({ po_id: 'Z006', vendor: 'Zepto', vendor_po_id: 'ZPO-778850', po_date: '2026-06-01', status: 'Deleted', bill_no: 'RM-26-27-005' }),
       po({ po_id: 'Z007', vendor: 'Zepto', vendor_po_id: 'ZPO-778830', po_date: '2026-04-12', bill_no: 'Z-001', bill_date: '2026-04-15' }),
       po({ po_id: 'Z008', vendor: 'Zepto', vendor_po_id: 'ZPO-778840', po_date: '2026-05-09', bill_no: 'RM-26-27-010', bill_date: '2026-05-12' }),
+      po({ po_id: 'Z009', vendor: 'Zepto', vendor_po_id: 'ZPO-778860- Dry', po_date: '2026-06-01', bill_no: '0612', bill_date: '2026-06-03' }),
     ],
     lines: [
       { po_id: 'Z001', line_no: 1, item_code: 'Z-RED', qty: 100, sku_code: 'RMB-RED-01' },
@@ -244,6 +254,7 @@ function romsRefs() {
       { po_id: 'N001', line_no: 1, item_code: 'N-HK', qty: 20, sku_code: 'RMH-WHT-6P' },
       { po_id: 'Z005', line_no: 1, item_code: 'Z-BLU', qty: 60, sku_code: 'RMB-BLU-01' },
       { po_id: 'Z003', line_no: 1, item_code: 'Z-BLU-NEW', qty: 5, sku_code: null },
+      { po_id: 'Z009', line_no: 1, item_code: '50012345', qty: 25, sku_code: 'RMB-YEL-01' },
     ],
     rtv: [
       { po_id: 'Z001', rtv_no: 'ZR001', dn_number: null, status: null, delivered: null, delivery_date: null, cn_number: null, cn_date: null },

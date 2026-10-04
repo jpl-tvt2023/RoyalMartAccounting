@@ -1,7 +1,7 @@
 // Phase 0 probe: pull masters and vouchers from every loaded Tally company,
 // read-only, and write them to a probe folder (layout in store.js).
 //
-// Order of work per company: the four master lists, then the Day Book one
+// Order of work per company: the four master lists, then the vouchers one
 // month at a time (or --chunk-days), so no single request is big enough to
 // freeze the accountant's Tally for long. A failed month is recorded and
 // skipped; only losing Tally altogether stops the run.
@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { findAll } = require('../tally/parse');
 const {
-  companiesRequest, mastersRequest, dayBookRequest, describeRequest, MASTER_TYPES,
+  companiesRequest, mastersRequest, vouchersRequest, eduSafeRange, describeRequest, MASTER_TYPES,
 } = require('../tally/requests');
 const {
   companiesFrom, groupsFrom, ledgersFrom, stockItemsFrom, voucherTypesFrom, baseTypeResolver, voucherFrom,
@@ -103,13 +103,21 @@ async function runProbe({
     const samples = new Map(); // voucher type → first raw objects
     const start = /^\d{4}-\d{2}-\d{2}$/.test(company.booksFrom) && company.booksFrom > from ? company.booksFrom : from;
     for (const p of start <= to ? periods(start, to, chunkDays) : []) {
-      const request = dayBookRequest({ company: company.name, from: p.from, to: p.to });
+      const ask = eduSafeRange(p.from, p.to);
+      const request = vouchersRequest({ company: company.name, ...ask });
       try {
-        const res = await client.post(request, { label: `${company.name}: Day Book ${p.from}…${p.to}` });
-        if (raw) raw.save(`${slug}/daybook-${p.from}_${p.to}.xml`, request, res.text, describeRequest);
+        const res = await client.post(request, { label: `${company.name}: vouchers ${p.from}…${p.to}` });
+        if (raw) raw.save(`${slug}/vouchers-${p.from}_${p.to}.xml`, request, res.text, describeRequest);
         const fresh = [];
+        const stray = [];
         for (const obj of findAll(res.tree, 'VOUCHER')) {
           const v = voucherFrom(obj, { baseTypeOf });
+          if (v.date) {
+            // Outside what was asked for: Tally ignored the period.
+            if (v.date < ask.from || v.date > ask.to) { stray.push(v.date); continue; }
+            // Inside only because the period was widened: another period's.
+            if (v.date < p.from || v.date > p.to) continue;
+          }
           const key = v.guid || `${v.type}|${v.number}|${v.date}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -119,12 +127,18 @@ async function runProbe({
         }
         writer.write(fresh);
         entry.vouchers += fresh.length;
-        entry.periods.push({ ...p, vouchers: fresh.length, ms: res.ms });
-        log(`  ${p.from} … ${p.to}: ${fresh.length} vouchers (${(res.ms / 1000).toFixed(1)}s)`);
+        entry.periods.push({ ...p, vouchers: fresh.length, ms: res.ms, ...(stray.length ? { stray: stray.length } : {}) });
+        if (stray.length) {
+          const dates = [...new Set(stray)].sort();
+          entry.errors.push(`Vouchers ${p.from}…${p.to}: Tally sent ${stray.length} dated outside ${ask.from}…${ask.to} `
+            + `(${dates[0]} … ${dates[dates.length - 1]}) — it ignored the period asked for`);
+        }
+        log(`  ${p.from} … ${p.to}: ${fresh.length} vouchers (${(res.ms / 1000).toFixed(1)}s)`
+          + (stray.length ? ` — ${stray.length} outside the period DROPPED` : ''));
       } catch (e) {
         if (e.code === 'UNREACHABLE') { run.errors.push(e.message); saveRun(); throw e; }
         entry.periods.push({ ...p, error: e.message });
-        entry.errors.push(`Day Book ${p.from}…${p.to}: ${e.message}`);
+        entry.errors.push(`Vouchers ${p.from}…${p.to}: ${e.message}`);
         log(`  ${p.from} … ${p.to}: FAILED — ${e.message}`);
       }
       saveRun();
