@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Probe output and ROMS references hold real books and real PO numbers —
+# never commit them. Synthetic fixtures live in agent/mock/ instead.
+out/
+rams-probe-*/
+rams-probe-*.zip
+roms-refs-*.json
+roms-refs-*.md
+agent/tests/fixtures/recorded/
+
+# Builds of the Connector exe
+agent/dist/
+*.log
