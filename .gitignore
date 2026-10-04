@@ -2,6 +2,16 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Test-only settings (a local SQLite file, dummy secrets) — committed so CI
+# and a fresh clone can run the suites.
+!.env.test
+
+# Local SQLite databases (backend dev, migrations run from a stray cwd)
+*.db
+backend/tests/.tmp/
+
+# Frontend build output
+frontend/dist/
 
 # Probe output and ROMS references hold real books and real PO numbers —
 # never commit them. Synthetic fixtures live in agent/mock/ instead.
