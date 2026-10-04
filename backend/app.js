@@ -16,8 +16,8 @@ const app = express();
 // for rate limiters to see the real client IP rather than the proxy's.
 app.set('trust proxy', 1);
 
-// Security headers. The SPA document's CSP lives on the static host
-// (frontend/vercel.json).
+// Security headers. The web app's CSP is set on its Vercel service, in the
+// root vercel.json.
 app.use(helmet());
 
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5174')
