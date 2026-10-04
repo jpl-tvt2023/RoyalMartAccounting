@@ -1,24 +1,28 @@
 // Phase 0 analysis: ROMS's hand-typed numbers against every Tally company.
 //
 // Answers the decision-gate questions from data instead of guesses:
-//   - does ROMS Bill No equal the Tally voucher number, and how was it typed
-//     ('/' → '-'?), and is any number ambiguous across companies or years
+//   - does ROMS Bill No equal a Tally sales invoice number, or only its
+//     serial ('607' for 607/RM/26-27), and is any number ambiguous across
+//     companies or years
 //   - does the Buyer's Order No find the PO (the planned primary match), and
 //     does it agree with Bill No
 //   - whose number is the RTV CN number, and does the Agst Ref route work
 //   - where GRN Discrepancy Numbers / RTV DNs live in Tally
 //   - how Flipkart/Amazon rows are vouchered (transfers to our own GSTINs?)
 //   - which Tally party ledger is which ROMS vendor
-//   - stock item ↔ SKU, and SKU/quantity sanity on linked invoices
-//   - how many blank ROMS fields auto-fill could fill, and how many the
-//     format rule would block
+//   - stock item ↔ SKU (directly, or through the marketplace code ROMS's
+//     vendor mapping holds), and SKU/quantity sanity on linked invoices
+//   - what auto-fill would write — Tally's numbers as they are — and how many
+//     ROMS's current format rule would block
 // Read-only on both sides; writes analysis.json + analysis.md.
 const fs = require('fs');
 const path = require('path');
 const { readProbe } = require('../probe/store');
 const { makeInternalCheck } = require('../probe/profile');
 const { summarizeRefs, renderRefsSummary } = require('../roms/summary');
-const { DocIndex, exactKey, normKey, splitRefs, howTyped } = require('../docno');
+const {
+  DocIndex, exactKey, normKey, compactKey, splitRefs, serialOf, withoutLabel, howTyped,
+} = require('../docno');
 const { ROMS_REF_RULE, TRANSFER_VENDORS, OUR_PAN } = require('../config');
 const { inc, top, addExample, pct, fyOf, mdTable, writeJson } = require('../util');
 
@@ -58,7 +62,10 @@ const describe = (e) => `${e.company} ${e.v.type} ${e.v.number || '(no number)'}
 const whereKey = (e, p) => `${e.v.baseType} · ${p}`;
 
 function buildIndexes(companies, codeOf) {
-  const byNumber = new DocIndex(); // voucher numbers
+  // Bill No is a sales invoice number. Matched against every voucher, a
+  // typed '607' also hits Payment 607 and Journal 607.
+  const salesByNumber = new DocIndex();
+  const salesBySerial = new DocIndex();
   const byDoc = new DocIndex(); // every reference-like field, number included
   const byOrder = new DocIndex(); // Buyer's Order No (invoice Order Details)
   const narrationTokens = new Set();
@@ -70,7 +77,10 @@ function buildIndexes(companies, codeOf) {
       if (v.cancelled || v.optional) continue;
       const ref = { v, company, slug: c.slug };
       live.push(ref);
-      if (v.number) byNumber.add(v.number, ref);
+      if (v.number && v.baseType === 'Sales') {
+        salesByNumber.add(v.number, ref);
+        if (serialOf(v.number)) salesBySerial.add(serialOf(v.number), ref);
+      }
       for (const [p, values] of Object.entries(v.docFields || {})) {
         for (const value of values) for (const one of splitRefs(value)) byDoc.add(one, { ...ref, path: p });
       }
@@ -86,7 +96,36 @@ function buildIndexes(companies, codeOf) {
       }
     }
   }
-  return { byNumber, byDoc, byOrder, narrationTokens, notesAgainst, live };
+  return { salesByNumber, salesBySerial, byDoc, byOrder, narrationTokens, notesAgainst, live };
+}
+
+// A typed Bill No: the whole sales invoice number, else — all digits — its
+// serial ('607', '0607' for 607/RM/26-27).
+function findBill(idx, billNo) {
+  const whole = idx.salesByNumber.find(billNo);
+  if (whole.level) return whole;
+  if (!/^\d+$/.test(String(billNo).trim())) return whole;
+  const serial = idx.salesBySerial.find(billNo);
+  return serial.level ? { level: 'serial', entries: serial.entries } : serial;
+}
+
+// A ROMS PO number as typed, then looser readings: without a trailing label
+// ('P4588464- Dry'), then each of several numbers in one field
+// ('48287510036332/48287510052160').
+function findOrder(idx, value) {
+  const direct = idx.byOrder.find(value);
+  if (direct.level) return direct;
+  const bare = withoutLabel(value);
+  if (bare) {
+    const hit = idx.byOrder.find(bare);
+    if (hit.level) return { level: 'label dropped', entries: hit.entries };
+  }
+  const parts = String(value).split('/').map((s) => s.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const entries = parts.flatMap((s) => idx.byOrder.find(withoutLabel(s) || s).entries);
+    if (entries.length) return { level: 'one of several numbers', entries };
+  }
+  return { level: null, entries: [] };
 }
 
 function analyze({ probeDir, refs, pan = OUR_PAN }) {
@@ -111,7 +150,7 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
 
   // ---- Bill No ↔ Tally voucher number
   const bill = {
-    withBillNo: 0, outcome: {}, byLevel: {}, typed: {}, baseTypes: {}, byVendor: {}, internalByVendor: {},
+    withBillNo: 0, outcome: {}, outcomeBySerial: 0, byLevel: {}, typed: {}, baseTypes: {}, byVendor: {}, internalByVendor: {},
     foundElsewhere: {}, dateCompared: 0, dateAgrees: 0, examples: { notFound: [], ambiguous: [], elsewhere: [] },
   };
   const billLinks = new Map();
@@ -120,7 +159,7 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
     bill.withBillNo++;
     const vb = bill.byVendor[p.vendor] || (bill.byVendor[p.vendor] = { withBillNo: 0, matched: 0, ambiguous: 0, notFound: 0, elsewhere: 0 });
     vb.withBillNo++;
-    const hit = idx.byNumber.find(p.bill_no);
+    const hit = findBill(idx, p.bill_no);
     if (!hit.level) {
       const elsewhere = idx.byDoc.find(p.bill_no);
       if (elsewhere.level) {
@@ -144,6 +183,7 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
       continue;
     }
     inc(bill.outcome, choice.how === 'unique' ? 'matched' : `matched (picked by ${choice.how})`);
+    if (hit.level === 'serial') bill.outcomeBySerial++;
     vb.matched++;
     const e = choice.chosen;
     billLinks.set(p.po_id, e);
@@ -159,14 +199,18 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
   // ---- Buyer's Order No ↔ ROMS Vendor PO (the planned primary match)
   const order = {
     pos: pos.length, found: 0, byLevel: {}, multiVoucher: 0, foundElsewhere: {}, narrationOnly: 0, notFound: 0,
-    bothMatched: 0, agree: 0, disagree: 0, byVendor: {}, examples: { conflicts: [], notFound: [], multi: [] },
+    bothMatched: 0, agree: 0, disagree: 0, byVendor: {}, byMonth: {}, examples: { conflicts: [], notFound: [], multi: [] },
   };
   const orderLinks = new Map();
   for (const p of pos) {
     const vb = order.byVendor[p.vendor] || (order.byVendor[p.vendor] = { pos: 0, found: 0 });
     vb.pos++;
+    // A month Tally has not been written up for yet shows as a gap here.
+    const month = String(p.po_date || '').slice(0, 7) || '(no date)';
+    const mb = order.byMonth[month] || (order.byMonth[month] = { pos: 0, found: 0 });
+    mb.pos++;
     if (blank(p.vendor_po_id)) continue;
-    const hit = idx.byOrder.find(p.vendor_po_id);
+    const hit = findOrder(idx, p.vendor_po_id);
     if (!hit.level) {
       const elsewhere = idx.byDoc.find(p.vendor_po_id);
       if (elsewhere.level) {
@@ -186,6 +230,7 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
     }
     order.found++;
     vb.found++;
+    mb.found++;
     inc(order.byLevel, hit.level);
     orderLinks.set(p.po_id, vs);
     if (vs.length > 1) {
@@ -296,15 +341,29 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
   // ---- Stock items ↔ SKUs
   const skuExact = new Map(refs.products.map((p) => [exactKey(p.sku_code), p.sku_code]));
   const skuNorm = new Map(refs.products.map((p) => [normKey(p.sku_code), p.sku_code]));
+  // Tally item names carry the marketplace's product code that ROMS's vendor
+  // mapping holds: 'RMWB003001 ITEM CODE-10192283 PID-611318' → Blinkit
+  // 10192283 → WB003. A code mapped to two SKUs is no evidence.
+  const skuByVendorCode = new Map();
+  for (const vc of refs.vendorCodes || []) {
+    const k = compactKey(vc.vendor_item_code);
+    if (k.length < 4 || !vc.sku_code) continue;
+    skuByVendorCode.set(k, skuByVendorCode.has(k) && skuByVendorCode.get(k) !== vc.sku_code ? null : vc.sku_code);
+  }
+  const skuFromCodeIn = (name) => {
+    const found = new Set(exactKey(name).split(/[^A-Z0-9]+/).map((t) => skuByVendorCode.get(t)).filter(Boolean));
+    return found.size === 1 ? [...found][0] : null;
+  };
   const itemToSku = new Map(); // `${slug}|${item}` → sku
   const stock = companies.map((c) => {
-    const s = { company: codeOf(c.slug), items: 0, byName: 0, byAlias: 0, normalisedOnly: 0, unmatched: 0, unmatchedExamples: [] };
+    const s = { company: codeOf(c.slug), items: 0, byName: 0, byAlias: 0, normalisedOnly: 0, byVendorCode: 0, unmatched: 0, unmatchedExamples: [] };
     for (const item of c.masters.stockItems || []) {
       s.items++;
       let sku = skuExact.get(exactKey(item.name));
       if (sku) s.byName++;
       else if ((sku = item.aliases.map((a) => skuExact.get(exactKey(a))).find(Boolean))) s.byAlias++;
       else if ((sku = skuNorm.get(normKey(item.name)) || item.aliases.map((a) => skuNorm.get(normKey(a))).find(Boolean))) s.normalisedOnly++;
+      else if ((sku = skuFromCodeIn(item.name) || item.aliases.map(skuFromCodeIn).find(Boolean))) s.byVendorCode++;
       else { s.unmatched++; addExample(s.unmatchedExamples, item.name, 10); }
       if (sku) itemToSku.set(`${c.slug}|${item.name}`, sku);
     }
@@ -328,7 +387,10 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
     if (!linesByPo.has(l.po_id)) linesByPo.set(l.po_id, []);
     linesByPo.get(l.po_id).push(l);
   }
-  const lineCheck = { checked: 0, allSkusOnInvoice: 0, someSkus: 0, noSkus: 0, qtyWithinPo: 0, qtyOverPo: 0, invoiceBeforePo: 0, examples: { noSkus: [], over: [] } };
+  const lineCheck = {
+    checked: 0, allSkusOnInvoice: 0, someSkus: 0, noSkus: 0, qtyWithinPo: 0, qtyOverPo: 0, invoiceBeforePo: 0,
+    invoiceLines: 0, linesWithSku: 0, linesSkuOnPo: 0, linesSameQty: 0, examples: { noSkus: [], over: [] },
+  };
   for (const p of pos) {
     const inv = invoiceOf(p.po_id);
     const lines = linesByPo.get(p.po_id) || [];
@@ -336,6 +398,15 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
     lineCheck.checked++;
     const poSkus = new Set(lines.map((l) => l.sku_code && exactKey(l.sku_code)).filter(Boolean));
     const invSkus = new Set(inv.v.inventoryLines.map((i) => itemToSku.get(`${inv.slug}|${i.item}`)).filter(Boolean).map(exactKey));
+    for (const i of inv.v.inventoryLines) {
+      lineCheck.invoiceLines++;
+      const sku = itemToSku.get(`${inv.slug}|${i.item}`);
+      if (!sku) continue;
+      lineCheck.linesWithSku++;
+      const onPo = lines.filter((l) => l.sku_code && exactKey(l.sku_code) === exactKey(sku));
+      if (onPo.length) lineCheck.linesSkuOnPo++;
+      if (onPo.some((l) => Number(l.qty) === Math.abs(i.qty || 0))) lineCheck.linesSameQty++;
+    }
     const common = [...poSkus].filter((s) => invSkus.has(s)).length;
     if (poSkus.size && common === poSkus.size) lineCheck.allSkusOnInvoice++;
     else if (common) lineCheck.someSkus++;
@@ -347,29 +418,59 @@ function analyze({ probeDir, refs, pan = OUR_PAN }) {
     if (p.po_date && inv.v.date < p.po_date) lineCheck.invoiceBeforePo++;
   }
 
-  // ---- Auto-fill potential for blank Bill Nos
-  const fill = { blankBill: 0, linkedOne: 0, linkedMany: 0, passesRule: 0, passesAfterSlashToDash: 0, wouldCollide: 0, examples: [] };
-  const usedBills = new Set(pos.filter((p) => !blank(p.bill_no)).map((p) => p.bill_no.trim()));
+  // ---- What Bill No auto-fill would write: Tally's whole number, as it is,
+  // over a typed serial ('607' → '607/RM/26-27') or into a blank.
+  const fill = {
+    typedBecomesWhole: 0, typedAlreadyWhole: 0, typedNeedsReview: 0,
+    blankBill: 0, linkedOne: 0, linkedMany: 0, blockedByRule: 0, alreadyOnAnotherPo: 0,
+    examples: { typed: [], review: [], blank: [] },
+  };
+  const voucherKey = (e) => `${e.slug}|${e.v.guid || `${e.v.type}|${e.v.number}|${e.v.date}`}`;
+  const billedBy = new Map([...billLinks].map(([poId, e]) => [voucherKey(e), poId]));
   for (const p of pos) {
-    if (!blank(p.bill_no)) continue;
+    const vs = orderLinks.get(p.po_id) || [];
+    if (!blank(p.bill_no)) {
+      // The Buyer's Order No says which invoice; the typed number has to be
+      // a way of writing that invoice's number ('607', '0607', '607-RM-…').
+      // If it fits none, or several, a person decides.
+      let e = billLinks.get(p.po_id) || null;
+      if (vs.length) {
+        const fitting = vs.filter((x) => howTyped(p.bill_no, x.v.number) !== 'other');
+        if (fitting.length !== 1) {
+          fill.typedNeedsReview++;
+          addExample(fill.examples.review, `${p.po_id} ${p.vendor} typed "${p.bill_no}", Buyer's Order No → ${vs.map(describe).join(' | ')}`, 6);
+          continue;
+        }
+        [e] = fitting;
+      }
+      if (!e) continue;
+      if (exactKey(p.bill_no) === exactKey(e.v.number)) fill.typedAlreadyWhole++;
+      else {
+        fill.typedBecomesWhole++;
+        addExample(fill.examples.typed, `${p.po_id} "${p.bill_no}" → "${e.v.number}"`, 4);
+      }
+      continue;
+    }
     fill.blankBill++;
-    const vs = orderLinks.get(p.po_id);
-    if (!vs) continue;
+    if (!vs.length) continue;
     if (vs.length > 1) { fill.linkedMany++; continue; }
     fill.linkedOne++;
-    const n = vs[0].v.number;
-    if (ROMS_REF_RULE.test(n)) fill.passesRule++;
-    else if (ROMS_REF_RULE.test(n.replace(/\//g, '-'))) fill.passesAfterSlashToDash++;
-    if (usedBills.has(n) || usedBills.has(n.replace(/\//g, '-'))) fill.wouldCollide++;
-    addExample(fill.examples, `${p.po_id} ${p.vendor} "${p.vendor_po_id}" ← ${describe(vs[0])}`, 6);
+    const e = vs[0];
+    if (!ROMS_REF_RULE.test(e.v.number)) fill.blockedByRule++;
+    const other = billedBy.get(voucherKey(e));
+    if (other) fill.alreadyOnAnotherPo++;
+    addExample(fill.examples.blank, `${p.po_id} ${p.vendor} "${p.vendor_po_id}" ← ${describe(e)}${other ? ` (already ${other}'s Bill No)` : ''}`, 6);
   }
 
-  // Sales numbers ROMS would reject, across companies.
+  // Sales numbers ROMS's current rule would reject, across companies. RAMS
+  // writes them unchanged, so the rule has to admit these characters.
   const salesLive = idx.live.filter((e) => e.v.baseType === 'Sales' && e.v.number);
+  const rejected = salesLive.filter((e) => !ROMS_REF_RULE.test(e.v.number));
   const format = {
     salesNumbers: salesLive.length,
-    failRule: salesLive.filter((e) => !ROMS_REF_RULE.test(e.v.number)).length,
-    passAfterSlashToDash: salesLive.filter((e) => !ROMS_REF_RULE.test(e.v.number) && ROMS_REF_RULE.test(e.v.number.replace(/\//g, '-'))).length,
+    failRule: rejected.length,
+    characters: [...new Set(rejected.flatMap((e) => [...e.v.number].filter((ch) => !ROMS_REF_RULE.test(ch))))].sort(),
+    example: rejected.length ? rejected[0].v.number : null,
   };
 
   const analysis = {
@@ -388,13 +489,10 @@ const counts = (obj, n = 12) => (Object.keys(obj).length
   ? mdTable(['', 'Count'], top(obj, n))
   : '_none_');
 
-function recommendSlash(a) {
-  const typed = a.bill.typed;
-  const total = Object.values(typed).reduce((n, x) => n + x, 0);
-  const slashDash = typed["'/' typed as '-'"] || 0;
-  if (!a.format.failRule) return 'No Tally sales number breaks the ROMS rule — no format change is needed.';
-  if (total && slashDash / total >= 0.5) return `Staff already type '/' as '-' (${slashDash} of ${total} matched bills). Option (b) — store Tally's number with '/' → '-' — keeps ROMS consistent with what is already there.`;
-  return 'Staff do not convert numbers in one consistent way. Choose between (a) widening the ROMS rule to allow \'/\' and (b) storing \'/\' as \'-\' before Bill No auto-fill is switched on.';
+function formatGate(f) {
+  if (!f.failRule) return 'Every live Tally sales number already passes ROMS\'s Bill No / CN / DN rule.';
+  const chars = f.characters.map((ch) => (ch === ' ' ? 'space' : `'${ch}'`)).join(', ');
+  return `RAMS writes Tally's numbers as they are (e.g. ${f.example}). ${f.failRule} of ${f.salesNumbers} live Tally sales numbers (${pct(f.failRule, f.salesNumbers)}) contain ${chars}, which ROMS's Bill No / CN / DN rule rejects today — widen the rule before auto-fill is switched on.`;
 }
 
 function renderAnalysis(a) {
@@ -403,13 +501,13 @@ function renderAnalysis(a) {
   out.push(`Tally probe: ${a.probe.dir} (${a.probe.companies.join(', ')}; ${a.probe.from} … ${a.probe.to}). ROMS: ${a.roms.source}, read ${a.roms.generatedAt}; ${a.roms.livePos} live POs (first ${a.coverage.firstPoDate || '—'}, last ${a.coverage.lastPoDate || '—'}), ${a.roms.rtvRows} RTV rows. Read-only on both sides.`);
   if (a.warnings.length) out.push(a.warnings.map((w) => `> ⚠ ${w}`).join('\n>\n'));
 
-  const b = a.bill, o = a.order, c = a.cn;
+  const b = a.bill, o = a.order, c = a.cn, f = a.fill;
   const matched = Object.entries(b.outcome).filter(([k]) => k.startsWith('matched')).reduce((n, [, x]) => n + x, 0);
   out.push('## Decision gate');
   out.push([
-    `1. **'/' in numbers.** ${a.format.failRule} of ${a.format.salesNumbers} live Tally sales numbers (${pct(a.format.failRule, a.format.salesNumbers)}) would be rejected by ROMS; ${a.format.passAfterSlashToDash} of those pass once '/' becomes '-'. ${recommendSlash(a)}`,
-    `2. **Buyer's Order No as the primary match.** Found ${o.found} of ${o.pos} live POs (${pct(o.found, o.pos)}) on a Tally sales invoice's Order Details. Where Bill No also matched, the two agree on ${o.agree} of ${o.bothMatched}${o.disagree ? ` — **${o.disagree} conflicts**` : ''}.${Object.keys(o.foundElsewhere).length ? ' Some PO numbers sit in other fields (below).' : ''}`,
-    `3. **Bill No.** ${matched} of ${b.withBillNo} ROMS Bill Nos (${pct(matched, b.withBillNo)}) match one Tally voucher; ${b.outcome.ambiguous || 0} ambiguous, ${b.outcome['only in another field'] || 0} only in another field, ${b.outcome['not found'] || 0} not found. Bill Date equals the voucher date on ${b.dateAgrees} of ${b.dateCompared}.`,
+    `1. **Tally's format in ROMS.** ${formatGate(a.format)}`,
+    `2. **Buyer's Order No as the primary match.** Found ${o.found} of ${o.pos} live POs (${pct(o.found, o.pos)}) on a Tally sales invoice's Order Details. Where Bill No also matched, the two agree on ${o.agree} of ${o.bothMatched}${o.disagree ? ` — **${o.disagree} conflicts**` : ''}.${Object.keys(o.foundElsewhere).length ? ' Some PO numbers sit in other fields (below).' : ''} Months Tally has not been written up for yet show as gaps in the by-month table below.`,
+    `3. **Bill No.** ${matched} of ${b.withBillNo} ROMS Bill Nos (${pct(matched, b.withBillNo)}) match one Tally sales invoice — ${matched - (b.outcomeBySerial || 0)} by the whole number, ${b.outcomeBySerial || 0} by its serial only (e.g. '607' for 607/RM/26-27); ${b.outcome.ambiguous || 0} ambiguous, ${b.outcome['only in another field'] || 0} only in another field, ${b.outcome['not found'] || 0} not found. Bill Date equals the invoice date on ${b.dateAgrees} of ${b.dateCompared}. On the next poll ${f.typedBecomesWhole} typed Bill Nos become Tally's whole number; ${f.typedNeedsReview} disagree with the Buyer's Order No and need a person.`,
     `4. **CN rule.** ${c.withCnAgainstInvoice} of ${c.invoiceLinked} invoice-linked RTV rows have a Tally credit note settling that invoice (Agst Ref)${c.multipleCn ? `, ${c.multipleCn} with more than one` : ''}. Of RTV rows with a typed CN number that also have one, the typed number is on that CN for ${c.typedEqualsAgstCn} and differs for ${c.typedDiffers}. Where typed CN numbers live in Tally is below — VOUCHERNUMBER means it is our CN number, REFERENCE means the marketplace's.`,
     `5. **Discrepancy / debit notes.** ${a.discrepancy.total} GRN Discrepancy Numbers: ${Object.entries(a.discrepancy.found).map(([k, n]) => `${k} ${n}`).join(', ') || '—'}. ${a.rtvDn.total} RTV DNs: ${Object.entries(a.rtvDn.found).map(([k, n]) => `${k} ${n}`).join(', ') || '—'}.`,
     `6. **Transfers.** ${a.transfers.map((t) => `${t.vendor}: ${t.linked} of ${t.withBillNo} bills linked, ${t.internal} to our own GSTINs`).join('; ')}.`,
@@ -419,12 +517,16 @@ function renderAnalysis(a) {
   out.push(mdTable(['ROMS vendor', 'Tally company · party ledger (POs linked)'], Object.entries(a.ledgerVotes).map(([v, votes]) => [v, top(votes, 4).map(([k, n]) => `${k} ×${n}`).join('<br>')])));
 
   out.push('## Auto-fill potential (nothing has been written)');
+  out.push('Auto-fill writes Tally\'s numbers as they are.');
   out.push([
-    `- **Builty Bill No**: ${a.fill.blankBill} live POs have a blank Bill No; ${a.fill.linkedOne} link to exactly one sales invoice by Buyer's Order No (${a.fill.linkedMany} to several). Of the ${a.fill.linkedOne}: ${a.fill.passesRule} pass the ROMS rule as-is, ${a.fill.passesAfterSlashToDash} pass only after '/' → '-'${a.fill.wouldCollide ? `, ${a.fill.wouldCollide} would collide with a Bill No already on another PO` : ''}.`,
+    `- **Builty Bill No, typed**: ${f.typedBecomesWhole} would be replaced by Tally's whole number, ${f.typedAlreadyWhole} already are it, ${f.typedNeedsReview} need a person (the typed number and the Buyer's Order No point at different invoices).`,
+    f.examples.typed.length ? `  e.g. ${f.examples.typed.join('; ')}` : '',
+    `- **Builty Bill No, blank**: ${f.blankBill} live POs have a blank Bill No; ${f.linkedOne} link to exactly one sales invoice by Buyer's Order No (${f.linkedMany} to several)${f.blockedByRule ? `; ${f.blockedByRule} of those numbers are blocked until ROMS's rule is widened` : ''}${f.alreadyOnAnotherPo ? `; ${f.alreadyOnAnotherPo} invoices are already another PO's Bill No` : ''}.`,
+    f.examples.blank.length ? `  e.g. ${f.examples.blank.join('; ')}` : '',
     `- **RTV CN No**: ${c.fillable} RTV rows on the page with a blank CN have exactly one credit note against their invoice${c.fillableBlockedByFormat ? ` (${c.fillableBlockedByFormat} blocked by the format rule)` : ''}.`,
-    a.fill.examples.length ? `- e.g. ${a.fill.examples.join('; ')}` : '',
-    c.examples.fillable.length ? `- e.g. ${c.examples.fillable.join('; ')}` : '',
+    c.examples.fillable.length ? `  e.g. ${c.examples.fillable.join('; ')}` : '',
   ].filter(Boolean).join('\n'));
+  if (f.examples.review.length) out.push(`Bill Nos that need a person, e.g.:\n${f.examples.review.map((x) => `- ${x}`).join('\n')}`);
 
   out.push('## Bill No detail');
   out.push(mdTable(['Vendor', 'With Bill No', 'Matched', 'Ambiguous', 'Other field only', 'Not found', 'To our own GSTIN'],
@@ -444,6 +546,10 @@ function renderAnalysis(a) {
 
   out.push("## Buyer's Order No detail");
   out.push(mdTable(['Vendor', 'Live POs', 'Found on a sales invoice'], Object.entries(o.byVendor).map(([v, x]) => [v, x.pos, `${x.found} (${pct(x.found, x.pos)})`])));
+  out.push('**By PO month** (a month Tally has not been written up for yet shows as a gap)');
+  out.push(mdTable(['PO month', 'Live POs', 'Found on a sales invoice'], Object.entries(o.byMonth).sort(([x], [y]) => x.localeCompare(y)).map(([m, x]) => [m, x.pos, `${x.found} (${pct(x.found, x.pos)})`])));
+  out.push('**How the PO number was found** (exact / normalised / compact as typed; label dropped: \'P4588464- Dry\' → P4588464; one of several numbers in one field)');
+  out.push(counts(o.byLevel));
   out.push(`${o.multiVoucher} POs are on more than one sales invoice (split dispatch). ${o.narrationOnly} PO numbers appear only in a narration. ${o.notFound} are nowhere in Tally.`);
   if (Object.keys(o.foundElsewhere).length) { out.push('**PO numbers found outside the Order Details**'); out.push(counts(o.foundElsewhere)); }
   for (const [label, list] of [['Conflicts', o.examples.conflicts], ['Several invoices', o.examples.multi], ['Not found', o.examples.notFound]]) {
@@ -467,14 +573,16 @@ function renderAnalysis(a) {
     a.transfers.map((t) => [t.vendor, t.pos, t.withBillNo, t.linked, t.internal, top(t.types).map(([k, n]) => `${k} ×${n}`).join('<br>')])));
 
   out.push('## Stock items ↔ SKUs');
-  out.push(mdTable(['Company', 'Stock items', 'Name = SKU', 'Alias = SKU', 'Only after normalising', 'No SKU', 'e.g. unmatched'],
-    a.stock.map((s) => [s.company, s.items, s.byName, s.byAlias, s.normalisedOnly, s.unmatched, s.unmatchedExamples.join(', ')])));
+  out.push(mdTable(['Company', 'Stock items', 'Name = SKU', 'Alias = SKU', 'Only after normalising', 'Vendor code in name', 'No SKU', 'e.g. unmatched'],
+    a.stock.map((s) => [s.company, s.items, s.byName, s.byAlias, s.normalisedOnly, s.byVendorCode, s.unmatched, s.unmatchedExamples.join(', ')])));
+  out.push('"Vendor code in name": the item name carries a marketplace product code from ROMS\'s vendor mapping (e.g. RMWB003001 ITEM CODE-10192283 → Blinkit 10192283 → WB003).');
   const sc = a.skuCoverage;
   out.push(`ROMS has ${sc.romsSkus} SKUs, ${sc.skusOnLivePos} of them on live PO lines; ${sc.onPosButNoTallyItem.length} of those have no Tally stock item${sc.onPosButNoTallyItem.length ? ` (${sc.onPosButNoTallyItem.slice(0, 12).join(', ')})` : ''}. ${sc.poLinesWithoutSku} of ${sc.poLines} PO lines have no SKU mapping in ROMS.`);
 
   const l = a.lineCheck;
   out.push('## Linked invoices — sanity');
   out.push(`Checked ${l.checked} PO ↔ invoice pairs with lines on both sides: all PO SKUs on the invoice ${l.allSkusOnInvoice}, some ${l.someSkus}, none ${l.noSkus}. Invoice quantity within PO quantity ${l.qtyWithinPo}, over ${l.qtyOverPo}. Invoice dated before the PO: ${l.invoiceBeforePo}.`);
+  out.push(`Line by line: ${l.invoiceLines} invoice lines, ${l.linesWithSku} with a SKU; that SKU is on the PO for ${l.linesSkuOnPo} (${pct(l.linesSkuOnPo, l.linesWithSku)}), with the same quantity for ${l.linesSameQty} (${pct(l.linesSameQty, l.linesWithSku)}).`);
   for (const [label, list] of [['No common SKU', l.examples.noSkus], ['Invoice quantity over PO', l.examples.over]]) {
     if (list.length) out.push(`${label}, e.g.:\n${list.map((x) => `- ${x}`).join('\n')}`);
   }

@@ -1,6 +1,6 @@
 const { sanitize, parseXml, txt, field, num, tallyDate, findAll } = require('../src/tally/parse');
 const {
-  exactKey, normKey, compactKey, splitRefs, mask, howTyped, DocIndex,
+  exactKey, normKey, compactKey, splitRefs, serialOf, withoutLabel, mask, howTyped, DocIndex,
 } = require('../src/docno');
 const {
   tallyDateArg, isoFromTally, companiesRequest, mastersRequest, vouchersRequest, eduSafeRange, describeRequest, VOUCHER_COLLECTION,
@@ -54,7 +54,22 @@ describe('docno', () => {
     expect(howTyped('RM26-27001', 'RM/26-27/001')).toBe("'/' left out");
     expect(howTyped('RM2627001', 'RM/26-27/001')).toBe('all separators left out');
     expect(howTyped('RM-26-27-1', 'RM/26-27/001')).toBe('separators or leading zeros differ');
+    expect(howTyped('607', '607/RM/26-27')).toBe('serial only');
+    expect(howTyped('0601', '601/RM/26-27')).toBe('serial only, leading zeros differ');
+    expect(howTyped('1819', '1219/RM/26-27')).toBe('other');
     expect(howTyped('XYZ', 'RM/26-27/001')).toBe('other');
+  });
+
+  test('serial of a voucher number, and a PO number without its label', () => {
+    expect(serialOf('607/RM/26-27')).toBe('607');
+    expect(serialOf('RM/26-27/012')).toBe('012');
+    expect(serialOf('4')).toBe('4');
+    expect(serialOf('RM/26-27')).toBe('');
+    expect(serialOf('12/RM/34')).toBe(''); // two candidates: no guess
+    expect(withoutLabel('P4588464- Dry')).toBe('P4588464');
+    expect(withoutLabel('P5120874 - SS')).toBe('P5120874');
+    expect(withoutLabel('ZPO-778812')).toBe('');
+    expect(withoutLabel('P4741737')).toBe('');
   });
 
   test('DocIndex answers at the strongest level with a hit, and ignores tiny compact keys', () => {

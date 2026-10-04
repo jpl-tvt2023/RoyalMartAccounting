@@ -54,9 +54,9 @@ test('connection: explicit flag, then ROMS_* env, then ROMS backend .env (relati
 
 test('summary: go-live date and the shapes of hand-typed numbers, deleted POs left out', () => {
   const s = summarizeRefs(buildDataset().romsRefs);
-  expect(s).toMatchObject({ livePos: 10, deletedPos: 1, firstPoDate: '2026-04-02', lastPoDate: '2026-06-10', breakingRule: 0, poLinesWithoutSku: 1 });
+  expect(s).toMatchObject({ livePos: 11, deletedPos: 1, firstPoDate: '2026-04-02', lastPoDate: '2026-06-10', breakingRule: 0, poLinesWithoutSku: 1 });
   const zepto = s.byVendor.find((v) => v.vendor === 'Zepto');
-  expect(zepto).toMatchObject({ pos: 7, withBillNo: 7 });
+  expect(zepto).toMatchObject({ pos: 8, withBillNo: 8 });
   expect(zepto.billFormats[0]).toEqual({ mask: 'AA-99-99-999', count: 5, example: 'RM-26-27-001' });
   expect(s.rtv).toMatchObject({ rows: 2, withCn: 1, withDn: 1 });
   expect(renderRefsSummary(s)).toContain('--from 2026-04-02');
