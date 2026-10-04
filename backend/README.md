@@ -12,6 +12,13 @@ RAMS_ADMIN_USERNAME=you RAMS_ADMIN_PASSWORD='Choose#One1' npm run bootstrap-admi
 npm run dev                   # http://localhost:5001  (ROMS uses 5000)
 ```
 
+In **PowerShell**, set the two variables with `$env:` instead, then clear them:
+
+```powershell
+$env:RAMS_ADMIN_USERNAME='you'; $env:RAMS_ADMIN_PASSWORD='Choose#One1'; npm run bootstrap-admin
+Remove-Item Env:RAMS_ADMIN_USERNAME, Env:RAMS_ADMIN_PASSWORD
+```
+
 - **`TURSO_DATABASE_URL`** is `file:./local.db` by default. The RAMS test database is `libsql://royalmart-rams-test-royalmart.aws-ap-south-1.turso.io`. `npm run migrate` applies to whatever this points at, so check it first.
 - **`npm run bootstrap-admin`** creates the first Admin once, only when no active Admin exists. It never resets anyone's password. That Admin must change the password at first sign-in, then creates everyone else from the Users page.
 
