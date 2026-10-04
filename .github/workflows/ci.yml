@@ -1,0 +1,55 @@
+name: CI
+
+# Every push, and every PR into main. Three independent apps, one job each.
+# `npm install`, not `npm ci`: the lockfiles are generated on Windows (as in ROMS).
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  agent:
+    name: Connector (agent)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - run: npx jest
+
+  backend:
+    name: API (backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      # Uses .env.test: a local SQLite file, never a real database.
+      - run: npm test
+
+  frontend:
+    name: Web app (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      # A build-breaking change fails CI even with green tests.
+      - run: npm run build
+      - run: npm test
