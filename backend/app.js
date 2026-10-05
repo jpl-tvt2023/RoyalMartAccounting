@@ -48,6 +48,9 @@ app.use(cors((req, cb) => {
   }
   return cb(Object.assign(new Error('This origin is not allowed to call the RAMS API'), { status: 403 }));
 }));
+// The Connector sends voucher batches of up to 250 (about 300 KB); everything
+// else stays on the small limit. The global parser skips a body already read.
+app.use('/api/agent', express.json({ limit: '4mb' }));
 app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
 app.use(globalLimiter);
@@ -55,6 +58,9 @@ app.use(globalLimiter);
 app.use('/api/auth',       require('./src/routes/auth.routes'));
 app.use('/api/users',      require('./src/routes/users.routes'));
 app.use('/api/audit-logs', require('./src/routes/audit.routes'));
+app.use('/api/companies',  require('./src/routes/companies.routes'));
+app.use('/api/sync',       require('./src/routes/sync.routes'));
+app.use('/api/agent',      require('./src/routes/agent.routes'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

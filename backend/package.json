@@ -13,6 +13,7 @@
     "start": "node server.js",
     "migrate": "node src/migrations/migrate.js",
     "bootstrap-admin": "node src/seeds/bootstrapAdmin.js",
+    "agent-token": "node src/seeds/agentToken.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch --runInBand"
   },

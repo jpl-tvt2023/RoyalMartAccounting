@@ -3,13 +3,14 @@ import {
   Activity, FileText, ReceiptText, ArrowLeftRight, AlertTriangle, Wallet, Users, ScrollText,
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
+import TallySyncCard from '../components/dashboard/TallySyncCard';
 import { useAuth } from '../context/AuthContext';
 import { useRBAC } from '../hooks/useRBAC';
 
 // The Phase 1 screens, in the order they are built (blueprint screens 1–6).
 // Each becomes a real page, and a NAV entry, as it lands.
 const COMING = [
-  { icon: Activity, title: 'Sync Health', text: 'The Connector, Tally and each company (MH, HR, WB): last sync, counts, errors.' },
+  { icon: Activity, title: 'Sync Health', text: 'The card above in full: every run per company, its counts and errors, and “Sync now”.' },
   { icon: FileText, title: 'Invoices', text: 'Every Tally sales invoice since go-live, its marketplace PO, received and outstanding.' },
   { icon: ReceiptText, title: 'Credit & Debit Notes', text: 'Each note with its invoice, PO and RTV row, and what was filled into ROMS.' },
   { icon: ArrowLeftRight, title: 'Stock Transfers', text: 'MH → HR / WB transfers behind the Flipkart and Amazon rows, kept out of receivables.' },
@@ -39,6 +40,8 @@ export default function Dashboard() {
             </Link>
           </div>
         )}
+
+        <TallySyncCard isAdmin={isAdmin} />
 
         <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400 mt-8 mb-3">Coming in Phase 1</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

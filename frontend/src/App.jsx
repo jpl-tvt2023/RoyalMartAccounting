@@ -9,6 +9,7 @@ import ForcePasswordReset from './pages/ForcePasswordReset';
 import Dashboard from './pages/Dashboard';
 import UserManagement from './pages/admin/UserManagement';
 import AuditLog from './pages/admin/AuditLog';
+import Companies from './pages/admin/Companies';
 import { ALL_ROLES, ADMIN_ONLY } from './utils/roles';
 
 // The single route table. Adding a route means a TitleManager entry too, and a
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute roles={ALL_ROLES}><Dashboard /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute roles={ADMIN_ONLY}><UserManagement /></ProtectedRoute>} />
           <Route path="/admin/audit-log" element={<ProtectedRoute roles={ADMIN_ONLY}><AuditLog /></ProtectedRoute>} />
+          <Route path="/admin/companies" element={<ProtectedRoute roles={ADMIN_ONLY}><Companies /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
