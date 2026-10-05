@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { ROLES, ALL_ROLES, ADMIN_ONLY, ROLE_INFO, NAV } from '../roles';
+import { ROLES, ALL_ROLES, ADMIN_ONLY, ROLE_INFO, NAV, PERM } from '../roles';
 import { PASSWORD_RULES, meetsPasswordPolicy } from '../passwordPolicy';
 
 // Pinned to the same values the backend's tests/roles.test.js asserts for
@@ -12,9 +12,22 @@ describe('the RAMS role set', () => {
     expect(Object.keys(ROLE_INFO)).toEqual(ALL_ROLES);
   });
 
-  test('the Admin menu is for Admin and Owner only', () => {
+  test('Users, the Audit Log and Roles & permissions stay Admin/Owner only; Tally companies follows its permissions', () => {
     const admin = NAV.find((n) => n.label === 'Admin');
-    expect(admin.children.every((c) => c.roles === ADMIN_ONLY)).toBe(true);
+    const by = (label) => admin.children.find((c) => c.label === label);
+    for (const label of ['Users', 'Audit Log', 'Roles & permissions']) {
+      expect(by(label).roles).toBe(ADMIN_ONLY);
+      expect(by(label).permission).toBeUndefined();
+    }
+    expect(by('Tally companies').permission).toEqual([PERM.SYNC_COMPANIES, PERM.SYNC_SCHEDULE]);
+  });
+
+  test('the Matching pages follow "See matching", and every permission key matches the backend catalog', () => {
+    const matching = NAV.find((n) => n.label === 'Matching');
+    expect(matching.children.map((c) => c.permission)).toEqual([PERM.MATCHING_VIEW, PERM.MATCHING_VIEW, PERM.MATCHING_VIEW]);
+    expect(Object.values(PERM)).toEqual([
+      'matching.view', 'matching.run', 'matching.review', 'matching.rules', 'matching.parties', 'sync.companies', 'sync.schedule',
+    ]);
   });
 });
 

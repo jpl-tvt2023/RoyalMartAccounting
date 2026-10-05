@@ -43,7 +43,7 @@ async function list(req, res, next) {
   } catch (err) { next(err); }
 }
 
-// PATCH /api/companies/:id { sync_enabled?, code? } -- Admin/Owner.
+// PATCH /api/companies/:id { sync_enabled?, code? } -- the sync.companies permission.
 async function update(req, res, next) {
   try {
     const id = Number.parseInt(req.params.id, 10);

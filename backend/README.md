@@ -2,7 +2,7 @@
 
 The RAMS API: Node 20, Express 5 (CommonJS), `@libsql/client` with raw SQL, the same stack and conventions as the ROMS backend, copied rather than shared.
 
-It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/sync/status` and `/api/health`. The Connector uses `/api/agent/*` (see below).
+It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/settings/permissions`, `/api/sync/status`, `/api/matching/*` and `/api/health`. The Connector uses `/api/agent/*` (see below).
 
 ## Run it locally
 
@@ -39,7 +39,7 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - Every write is idempotent on (company, Tally GUID).
   - A voucher older than the stored copy (lower AlterID) is skipped.
   - Watermarks move only when a run finishes ok (`controllers/agent.controller.js`).
-- **The tables** (migrations 004–009):
+- **The tables** (migrations 004–009; 010–012 are permissions and matching, below):
   - `tally_companies`, `agents`, `tally_sync_state`, `tally_sync_runs`
   - the masters (`tally_groups`, `tally_ledgers`, `tally_stock_items`, `tally_voucher_types`)
   - `tally_vouchers` with its ledger lines, bill allocations, inventory lines and Buyer's Order Nos
@@ -50,11 +50,60 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - the Connector gets it in every heartbeat reply (`settings.schedule`)
 - **`RAMS_SYNC_FROM`** (default `2026-06-08`, ROMS go-live) is the first day mirrored. Changing it later needs a resync of each company.
 
+## Who can do what (M5)
+
+- **Roles are fixed:** Admin, Owner, Accountant, Viewer.
+- **What Accountants and Viewers may do is data**, set on *Admin → Roles & permissions*:
+  - stored in `role_permissions` (migration 010), audited as `ROLE_PERMISSIONS_UPDATE`
+  - **Admin and Owner always hold every permission**
+- **The permission catalog** (keys, labels, what each allows) is `src/services/permissions.js`, because each key guards a route.
+  - Routes use `requirePermission(key)` (`middleware/permission.js`), which looks the permission up on every request, so a change applies at once.
+  - `/api/auth/me` and login return the user's effective `permissions`, and the UI hides what they can't use.
+- **Users, the Audit Log and the permissions page stay `allowRoles(Admin, Owner)` and are never grantable**, so nobody can give themselves admin rights.
+- **Defaults:**
+  - Accountants: every `matching.*` permission
+  - Viewers: `matching.view`
+  - `sync.companies` and `sync.schedule`: Admin/Owner until granted
+
+## Matching (M5)
+
+RAMS links each ROMS PO to the Tally sales invoice that billed it, and each RTV row to the credit note that settled it. Nothing is written to ROMS yet (that is M6); each linked row only shows what auto-fill *would* write.
+
+- **Reading ROMS:**
+  - `services/romsClient.js` pages `GET {ROMS_API_URL}/api/integration/refs/:resource` with ROMS's `INTEGRATION_TOKEN` (ROMS `feature/RAMS`, M1). It's read-only.
+  - `services/romsRefs.js` keeps a copy in `roms_*` (migration 011), writing only the rows that changed.
+  - An answer with no POs where RAMS holds some is refused, keeping the copy.
+  - With `ROMS_API_URL` / `ROMS_INTEGRATION_TOKEN` unset, matching uses the last copy.
+- **The engine:**
+  - `matching/engine.js` is pure, ported from the Phase 0 analyzer: Buyer's Order No first, then the Bill No (whole or serial), the tie-breaks, and the checks.
+  - Every step is a setting in `match_settings` (migration 012, `services/matchSettings.js`), along with `match_vendors` and `party_ledgers`.
+  - **A person's decision always wins:** `doc_links` rows that are `confirmed` or `rejected`.
+  - `matching/reasons.js` lists every code the engine emits; the frontend words each one.
+- **A run** (`matching/run.js`):
+  1. one at a time; a run older than 10 minutes is closed as failed
+  2. read ROMS
+  3. load (`matching/load.js`)
+  4. match
+  5. write what changed (`matching/write.js`): `match_results`, auto `doc_links`, and the party-ledger suggestions
+- **When it runs:**
+  - The heartbeat reply asks the Connector for a match (`commands: [{ type: 'match' }]`) when none has run, when Tally changed since the last one, or every `run_every_minutes` in office hours. The Connector then calls `POST /api/agent/match`.
+  - People press **Match now** (`POST /api/matching/run`).
+  - A rule, vendor, party-ledger or decision change re-matches on the stored copy at once.
+  - `npm run match` does one run from the command line, against whatever `.env` points at.
+- **The API (`/api/matching`):**
+  - `summary`, `results` (+ `/:kind/:id`), `vouchers` (search)
+  - `run`
+  - `results/:kind/:id/confirm|pick|reject|undo`
+  - `settings` (GET/PUT), `settings/reset`, `preview` (the draft rules' effect, nothing written)
+  - `vendors`, `voucher-types`
+  - `party-ledgers` (+ `accept-suggestions`)
+  - Each route takes the `matching.*` permission it needs (`routes/matching.routes.js`).
+
 ## On Vercel
 
 RAMS is **one Vercel project** using [Services](https://vercel.com/docs/services) (Beta), configured in the root `vercel.json`. This API is the `backend` service, served on `/api/*`, and the web app is the `frontend` service on everything else, all on one domain. The API runs on Vercel's zero-config Express support, using `app.js`, which exports the app. `server.js` is for local runs only.
 
-The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `NODE_ENV=production`, plus `RAMS_SYNC_FROM` if the default sync start isn't wanted. Changing a variable only takes effect after a redeploy. **Vercel doesn't run migrations:** run `npm run migrate` against the database first, after checking `.env`.
+The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `NODE_ENV=production`, plus `RAMS_SYNC_FROM` if the default sync start isn't wanted, and `ROMS_API_URL` / `ROMS_INTEGRATION_TOKEN` for matching. Changing a variable only takes effect after a redeploy. **Vercel doesn't run migrations:** run `npm run migrate` against the database first, after checking `.env`.
 
 `FRONTEND_URL` is optional. The API always accepts requests from its own domain, which covers production, previews and per-deployment URLs. List other origins in `FRONTEND_URL` (comma-separated) only when they need to call it, for example `http://localhost:5174` in development. Any other origin gets a 403.
 

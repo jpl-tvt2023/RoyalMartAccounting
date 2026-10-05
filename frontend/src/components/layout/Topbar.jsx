@@ -7,9 +7,9 @@ import NavDropdown from './NavDropdown';
 import Wordmark from './Wordmark';
 
 // (Copied from ROMS: a horizontal top bar, no sidebar, built from NAV and
-// filtered by role.)
+// filtered by role or permission.)
 export default function Topbar() {
-  const { user, logout } = useAuth();
+  const { user, logout, can } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // The mobile menu is open only on the route it was opened on, so a
@@ -19,7 +19,8 @@ export default function Topbar() {
   const mobilePanelRef = useRef(null);
 
   const userRoles = user?.roles || [];
-  const canSee = (item) => item.roles.some((r) => userRoles.includes(r));
+  // An entry is shown by role, or by permission (set per role by Admin/Owner).
+  const canSee = (item) => (item.permission ? can(item.permission) : item.roles.some((r) => userRoles.includes(r)));
   const visibleNav = NAV.map((entry) => {
     if (entry.children) {
       const children = entry.children.filter(canSee);
@@ -101,7 +102,7 @@ export default function Topbar() {
               <div key={entry.label} className="pt-1">
                 <p className="px-4 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-white/40">{entry.label}</p>
                 {entry.children.map((child) => (
-                  <NavLink key={child.path} to={child.path} className={mobileLinkCls}>
+                  <NavLink key={child.path} to={child.path} end className={mobileLinkCls}>
                     {child.icon && <child.icon size={16} className="shrink-0" />}
                     {child.label}
                   </NavLink>

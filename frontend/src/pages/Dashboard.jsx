@@ -4,6 +4,9 @@ import {
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
 import TallySyncCard from '../components/dashboard/TallySyncCard';
+import MatchingCard from '../components/dashboard/MatchingCard';
+import HelpLink from '../components/shared/HelpLink';
+import { PERM } from '../utils/roles';
 import { useAuth } from '../context/AuthContext';
 import { useRBAC } from '../hooks/useRBAC';
 
@@ -20,12 +23,15 @@ const COMING = [
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { isAdmin } = useRBAC();
+  const { isAdmin, can } = useRBAC();
 
   return (
     <AppShell>
       <div className="max-w-5xl">
-        <h1 className="text-2xl font-bold text-brand">Welcome, {user?.name}</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-brand">Welcome, {user?.name}</h1>
+          <HelpLink section="dashboard" />
+        </div>
         <p className="text-gray-500 text-sm mt-1">
           RAMS keeps the accounts for what ROMS runs: Tally’s invoices and credit notes, linked to the marketplace POs.
         </p>
@@ -41,7 +47,8 @@ export default function Dashboard() {
           </div>
         )}
 
-        <TallySyncCard isAdmin={isAdmin} />
+        <TallySyncCard isAdmin={can([PERM.SYNC_COMPANIES, PERM.SYNC_SCHEDULE])} />
+        {can(PERM.MATCHING_VIEW) && <MatchingCard />}
 
         <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400 mt-8 mb-3">Coming in Phase 1</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

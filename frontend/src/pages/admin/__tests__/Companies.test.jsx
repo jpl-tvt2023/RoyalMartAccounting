@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Companies from '../Companies';
-import { renderWithProviders } from '../../../test/renderWithProviders';
+import { renderWithProviders, ADMIN, VIEWER } from '../../../test/renderWithProviders';
 import * as companiesApi from '../../../api/companies.api';
 
 vi.mock('../../../api/companies.api', () => ({ listCompanies: vi.fn(), updateCompany: vi.fn() }));
@@ -31,7 +31,7 @@ describe('Tally companies page', () => {
       row({ id: 2, guid: 'a606914f', name: 'Test Company', code: 'MH', gstin: null, sync_enabled: false, vouchers: 0 }),
     ]);
     companiesApi.updateCompany.mockResolvedValue({});
-    renderWithProviders(<Companies />);
+    renderWithProviders(<Companies />, { user: ADMIN });
 
     expect(await screen.findByText('Roymax Products LLP ( Maharashtra )')).toBeInTheDocument();
     expect(screen.getByText('1 syncing · 1 not synced')).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('Tally companies page', () => {
   test('edits the short code', async () => {
     companiesApi.listCompanies.mockResolvedValue([row()]);
     companiesApi.updateCompany.mockResolvedValue({});
-    renderWithProviders(<Companies />);
+    renderWithProviders(<Companies />, { user: ADMIN });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /Edit code for/ }));
     const input = screen.getByLabelText('Short code');
@@ -57,5 +57,22 @@ describe('Tally companies page', () => {
     await user.type(input, 'mh1');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(companiesApi.updateCompany).toHaveBeenCalledWith(1, { code: 'MH1' });
+  });
+
+  test('buttons follow the permissions: a Viewer only looks; an Accountant granted the schedule may edit only that', async () => {
+    companiesApi.listCompanies.mockResolvedValue([row()]);
+    renderWithProviders(<Companies />, { user: VIEWER });
+    expect(await screen.findByText('Roymax Products LLP ( Maharashtra )')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Turn sync/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit code for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Edit$/ })).not.toBeInTheDocument();
+  });
+
+  test('an Accountant granted only the sync schedule sees its Edit, not the sync switches', async () => {
+    companiesApi.listCompanies.mockResolvedValue([row()]);
+    renderWithProviders(<Companies />, { user: { ...VIEWER, roles: ['Accountant'], permissions: ['sync.schedule'] } });
+    expect(await screen.findByText('Roymax Products LLP ( Maharashtra )')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Turn sync/ })).not.toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import Badge from '../../components/ui/Badge';
 import { HistoryButton } from '../../components/shared/HistoryDrawer';
 import PasswordCriteria from '../../components/shared/PasswordCriteria';
+import HelpLink from '../../components/shared/HelpLink';
 import {
   listUsers, createUser, updateUser, deactivateUser, reactivateUser, resetUserPassword,
 } from '../../api/users.api';
@@ -108,7 +109,10 @@ export default function UserManagement() {
           <h1 className="text-2xl font-bold text-brand">Users</h1>
           <p className="text-gray-500 text-sm">{active} active · {users.length - active} deactivated</p>
         </div>
-        <Button onClick={openAdd}><UserPlus size={16} />Add User</Button>
+        <div className="flex items-center gap-3">
+          <HelpLink section="users" />
+          <Button onClick={openAdd}><UserPlus size={16} />Add User</Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

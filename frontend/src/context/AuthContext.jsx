@@ -3,7 +3,20 @@ import { login as apiLogin, logout as apiLogout, me as apiMe } from '../api/auth
 
 // (Adapted from ROMS.) The access token and the user live in localStorage; the
 // refresh token is an httpOnly cookie the browser holds.
-const AuthContext = createContext(null);
+// eslint-disable-next-line react-refresh/only-export-components
+export const AuthContext = createContext(null);
+
+// Whether `user` may do `key` (a permission, or a list where any one is
+// enough): Admin and Owner always; others as Admin -> Roles & permissions set
+// it for their roles, which the API sends in user.permissions. Shapes the UI
+// only -- the API checks every request itself.
+// eslint-disable-next-line react-refresh/only-export-components
+export function canDo(user, key) {
+  if (!user) return false;
+  if ((user.roles || []).some((r) => r === 'Admin' || r === 'Owner')) return true;
+  const held = user.permissions || [];
+  return (Array.isArray(key) ? key : [key]).some((k) => held.includes(k));
+}
 
 const store = (accessToken, user) => {
   if (accessToken) localStorage.setItem('accessToken', accessToken);
@@ -55,8 +68,10 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const can = useCallback((key) => canDo(user, key), [user]);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, applySession }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, applySession, can }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,7 +1,8 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SyncSchedulePanel from '../SyncSchedulePanel';
+import { renderWithProviders, ADMIN } from '../../../test/renderWithProviders';
 import * as settingsApi from '../../../api/settings.api';
 import { describeDays } from '../../../utils/syncSchedule';
 
@@ -18,7 +19,7 @@ describe('Sync schedule panel', () => {
 
   test('shows the schedule in force', async () => {
     settingsApi.getSyncSchedule.mockResolvedValue(AGREED);
-    render(<SyncSchedulePanel />);
+    renderWithProviders(<SyncSchedulePanel />, { user: ADMIN });
     expect(await screen.findByText('Mon–Sat, 09:00–20:00')).toBeInTheDocument();
     expect(screen.getByText('60 min')).toBeInTheDocument();
     expect(screen.getByText('19:30')).toBeInTheDocument();
@@ -28,7 +29,7 @@ describe('Sync schedule panel', () => {
   test('an Admin changes the days and times', async () => {
     settingsApi.getSyncSchedule.mockResolvedValue(AGREED);
     settingsApi.updateSyncSchedule.mockImplementation(async (body) => ({ ...AGREED, ...body, updated_at: '2026-10-05 15:00:00', updated_by_name: 'Keshav' }));
-    render(<SyncSchedulePanel />);
+    renderWithProviders(<SyncSchedulePanel />, { user: ADMIN });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /edit/i }));
     const dialog = screen.getByRole('dialog');

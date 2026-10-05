@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { logAction } = require('../services/auditLog.service');
 const { validatePassword } = require('../services/passwordPolicy');
+const { permissionsOf } = require('../services/permissions');
 const {
   JWT_ACCESS_SECRET, JWT_REFRESH_SECRET,
   JWT_ACCESS_EXPIRY, JWT_REFRESH_EXPIRY,
@@ -51,9 +52,13 @@ function cookieOptions() {
 const setRefreshCookie = (res, user) => res.cookie(REFRESH_COOKIE, signRefresh(user), { ...cookieOptions(), maxAge: REFRESH_MAX_AGE_MS });
 const clearRefreshCookie = (res) => res.clearCookie(REFRESH_COOKIE, cookieOptions());
 
-const publicUser = (user) => ({
+// What the app is told about the signed-in user. `permissions` is what their
+// roles may do (Admin -> Roles & permissions); the UI hides what they can't,
+// and the API refuses it regardless.
+const publicUser = async (user) => ({
   id: Number(user.id), name: user.name, username: user.username, roles: user.roles || [],
   is_first_login: Boolean(user.is_first_login),
+  permissions: await permissionsOf(db, user.roles || []),
 });
 
 // POST /api/auth/login { username, password }
@@ -83,7 +88,7 @@ async function login(req, res, next) {
     user.roles = await loadUserRoles(db, user.id);
     setRefreshCookie(res, user);
     await logAction({ userId: user.id, actionType: 'LOGIN', description: `${user.name} signed in`, entityType: 'user', entityId: user.id });
-    res.json({ accessToken: signAccess(user), user: publicUser(user) });
+    res.json({ accessToken: signAccess(user), user: await publicUser(user) });
   } catch (err) { next(err); }
 }
 
@@ -105,7 +110,7 @@ async function refresh(req, res, next) {
       return res.status(401).json({ message: SESSION_ENDED });
     }
     user.roles = await loadUserRoles(db, user.id);
-    res.json({ accessToken: signAccess(user), user: publicUser(user) });
+    res.json({ accessToken: signAccess(user), user: await publicUser(user) });
   } catch (err) { next(err); }
 }
 
@@ -118,7 +123,7 @@ async function me(req, res, next) {
     });
     if (!rows.length || !rows[0].is_active) return res.status(401).json({ message: SESSION_ENDED });
     const user = { ...rows[0], roles: await loadUserRoles(db, req.user.id) };
-    res.json({ user: publicUser(user) });
+    res.json({ user: await publicUser(user) });
   } catch (err) { next(err); }
 }
 
@@ -161,7 +166,7 @@ async function changePassword(req, res, next) {
 
     updated.roles = await loadUserRoles(db, user.id);
     setRefreshCookie(res, updated);
-    res.json({ message: 'Password updated', accessToken: signAccess(updated), user: publicUser(updated) });
+    res.json({ message: 'Password updated', accessToken: signAccess(updated), user: await publicUser(updated) });
   } catch (err) { next(err); }
 }
 

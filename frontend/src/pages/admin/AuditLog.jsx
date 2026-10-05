@@ -5,6 +5,7 @@ import AppShell from '../../components/layout/AppShell';
 import Button from '../../components/ui/Button';
 import Pagination, { loadPersistedPageSize, persistPageSize } from '../../components/ui/Pagination';
 import ChangeList from '../../components/shared/ChangeList';
+import HelpLink from '../../components/shared/HelpLink';
 import { listAuditLogs, getAuditFacets } from '../../api/audit.api';
 import { useSessionState } from '../../hooks/useSessionState';
 import { formatDateTime } from '../../utils/formatters';
@@ -60,7 +61,10 @@ export default function AuditLog() {
   return (
     <AppShell>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-brand">Audit Log</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-brand">Audit Log</h1>
+          <HelpLink section="audit-log" />
+        </div>
         <p className="text-gray-500 text-sm">Every change in RAMS — who made it, when, and what changed.</p>
       </div>
 

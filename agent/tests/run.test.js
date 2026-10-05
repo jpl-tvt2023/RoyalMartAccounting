@@ -109,6 +109,40 @@ describeIf('rams-connector run', () => {
     expect(await service.cycle()).toEqual([]);
   });
 
+  test('after a sync RAMS asks for a match; the Connector starts it, and RAMS links the POs it reads from ROMS', async () => {
+    // eslint-disable-next-line global-require
+    const { startFakeRoms, emptyRefs, po } = require('../../backend/tests/helpers/roms');
+    const data = emptyRefs();
+    data.vendors = [{ name: 'Zepto', is_active: 1 }];
+    data.pos = [
+      po('Z1', { vendor: 'Zepto', vendor_po_id: 'ZPO-778812', po_date: '2026-04-02' }),
+      po('Z2', { vendor: 'Zepto', vendor_po_id: 'ZPO-999999', po_date: '2026-04-02' }),
+    ];
+    const roms = await startFakeRoms(data);
+    Object.assign(process.env, { ROMS_API_URL: roms.url, ROMS_INTEGRATION_TOKEN: roms.token });
+    try {
+      // The last match was before the syncs above.
+      await rams.db.execute("UPDATE match_runs SET started_at = datetime('now', '-1 day')");
+      clock = new Date(clock.getTime() + 60000);
+      await service.cycle();
+      expect(roms.calls.some((c) => c.startsWith('/api/integration/refs/pos'))).toBe(true);
+      expect(await rams.one("SELECT outcome, voucher_number FROM match_results WHERE target_kind = 'po' AND target_id = 'Z1'"))
+        .toMatchObject({ outcome: 'linked', voucher_number: 'RM/26-27/001' });
+      expect(await rams.one("SELECT outcome, reason FROM match_results WHERE target_kind = 'po' AND target_id = 'Z2'"))
+        .toMatchObject({ outcome: 'waiting', reason: 'not_invoiced' });
+      expect(await rams.one("SELECT trigger, status, roms_ok FROM match_runs ORDER BY id DESC LIMIT 1"))
+        .toMatchObject({ trigger: 'connector', status: 'ok', roms_ok: 1 });
+      // Asked once: the next heartbeat has nothing more for it.
+      const next = await service.heartbeat();
+      expect(next.commands.filter((c) => c.why === 'Tally changed since the last match')).toEqual([]);
+      expect(next.matching).toMatchObject({ status: 'ok', po: { linked: 1, waiting: 1 } });
+    } finally {
+      delete process.env.ROMS_API_URL;
+      delete process.env.ROMS_INTEGRATION_TOKEN;
+      await roms.close();
+    }
+  });
+
   test('when Tally stops answering, the heartbeat says so and nothing is synced', async () => {
     await mock.close();
     mock = null;

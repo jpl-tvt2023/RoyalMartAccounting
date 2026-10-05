@@ -138,6 +138,13 @@ describe('RAMS API client', () => {
     expect(await api.finish(3, { ok: true })).toEqual({ sync: null });
   });
 
+  test('a match RAMS is already running counts as started, not as an error', async () => {
+    const { calls, api } = make([reply(200, { run_id: 4, counts: { po: { linked: 2 } } }), reply(409, { message: 'Matching is already running' })]);
+    expect(await api.match()).toMatchObject({ run_id: 4 });
+    expect(calls[0].url).toBe('https://rams.example/api/agent/match');
+    expect(await api.match()).toEqual({ skipped: true, message: 'Matching is already running' });
+  });
+
   test('needs an address and a token', () => {
     expect(() => createApiClient({ apiUrl: '', token: 'x' })).toThrow(/No RAMS address/);
     expect(() => createApiClient({ apiUrl: 'https://x', token: '' })).toThrow(/No Connector token/);

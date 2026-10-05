@@ -3,8 +3,10 @@
 // Every minute it sends RAMS a heartbeat (is Tally answering, which companies
 // are loaded, their counters, what the Connector is doing, its last error) and
 // gets back the companies whose sync is on. Then, one company at a time, it
-// runs whatever the scheduler says is due. Nothing here ever exits on an
-// error: it is logged, reported in the next heartbeat, and tried again.
+// runs whatever the scheduler says is due, and last, if RAMS asked for one,
+// a matching run (RAMS on Vercel has no clock of its own). Nothing here ever
+// exits on an error: it is logged, reported in the next heartbeat, and tried
+// again.
 const { listCompanies, pullSysInfo } = require('./tally/pull');
 const { syncCompany } = require('./sync');
 const { decide } = require('./sync/scheduler');
@@ -158,7 +160,31 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
         state.activity = { state: 'idle' };
       }
     }
+    if ((state.server.commands || []).some((c) => c.type === 'match')) await match();
     return results;
+  }
+
+  // RAMS reads ROMS again and matches; the Connector only starts it.
+  async function match() {
+    const why = (state.server.commands.find((c) => c.type === 'match') || {}).why;
+    state.activity = { state: 'matching', since: now().toISOString() };
+    try {
+      const out = await api.match();
+      if (out.skipped) {
+        log(`Matching: ${out.message}`);
+      } else {
+        const po = (out.counts && out.counts.po) || {};
+        log(`Matching${why ? ` (${why.toLowerCase()})` : ''}: ${po.linked || 0} POs linked, ${po.review || 0} need review, ${po.waiting || 0} waiting for Tally${out.roms && !out.roms.ok ? ` — ROMS not read: ${out.roms.error}` : ''}`);
+      }
+      recovered('RAMS');
+      state.server.commands = state.server.commands.filter((c) => c.type !== 'match');
+      return out;
+    } catch (e) {
+      fail(`RAMS: matching failed — ${e.message}`);
+      return null;
+    } finally {
+      state.activity = { state: 'idle' };
+    }
   }
 
   // Forever: a cycle, then wait. A heartbeat goes out every heartbeatSeconds
@@ -182,7 +208,7 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
     }
   }
 
-  return { state, checkTally, heartbeat, cycle, runForever };
+  return { state, checkTally, heartbeat, cycle, match, runForever };
 }
 
 module.exports = { createService };

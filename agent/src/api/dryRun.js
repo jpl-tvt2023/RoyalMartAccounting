@@ -21,6 +21,7 @@ function createDryRunApi({ outDir, names = new Map() }) {
     outDir,
     counts,
     async heartbeat() { return { companies: [], settings: {}, commands: [] }; },
+    async match() { return { skipped: true, message: 'dry run' }; },
     async startRun(body) {
       const runId = runs.size + 1;
       runs.set(runId, slugify(names.get(body.company_id) || `company-${body.company_id}`));

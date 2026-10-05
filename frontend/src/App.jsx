@@ -10,7 +10,12 @@ import Dashboard from './pages/Dashboard';
 import UserManagement from './pages/admin/UserManagement';
 import AuditLog from './pages/admin/AuditLog';
 import Companies from './pages/admin/Companies';
-import { ALL_ROLES, ADMIN_ONLY } from './utils/roles';
+import Permissions from './pages/admin/Permissions';
+import MatchReview from './pages/matching/MatchReview';
+import MatchingRules from './pages/matching/MatchingRules';
+import PartyLedgers from './pages/matching/PartyLedgers';
+import Help from './pages/Help';
+import { ALL_ROLES, ADMIN_ONLY, PERM } from './utils/roles';
 
 // The single route table. Adding a route means a TitleManager entry too, and a
 // NAV entry in utils/roles.js if it belongs in the top bar.
@@ -35,7 +40,12 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute roles={ALL_ROLES}><Dashboard /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute roles={ADMIN_ONLY}><UserManagement /></ProtectedRoute>} />
           <Route path="/admin/audit-log" element={<ProtectedRoute roles={ADMIN_ONLY}><AuditLog /></ProtectedRoute>} />
-          <Route path="/admin/companies" element={<ProtectedRoute roles={ADMIN_ONLY}><Companies /></ProtectedRoute>} />
+          <Route path="/admin/companies" element={<ProtectedRoute permission={[PERM.SYNC_COMPANIES, PERM.SYNC_SCHEDULE]}><Companies /></ProtectedRoute>} />
+          <Route path="/admin/permissions" element={<ProtectedRoute roles={ADMIN_ONLY}><Permissions /></ProtectedRoute>} />
+          <Route path="/matching" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><MatchReview /></ProtectedRoute>} />
+          <Route path="/matching/rules" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><MatchingRules /></ProtectedRoute>} />
+          <Route path="/matching/parties" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><PartyLedgers /></ProtectedRoute>} />
+          <Route path="/help" element={<ProtectedRoute roles={ALL_ROLES}><Help /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
