@@ -26,7 +26,9 @@ Remove-Item Env:RAMS_ADMIN_USERNAME, Env:RAMS_ADMIN_PASSWORD
 
 RAMS is **one Vercel project** using [Services](https://vercel.com/docs/services) (Beta), configured in the root `vercel.json`. This API is the `backend` service, served on `/api/*`, and the web app is the `frontend` service on everything else, all on one domain. The API runs on Vercel's zero-config Express support, using `app.js`, which exports the app. `server.js` is for local runs only.
 
-The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `NODE_ENV=production` and `FRONTEND_URL`. Set `FRONTEND_URL` to the deployment's own `https://` domain, because the browser's sign-in request carries that origin. Changing a variable only takes effect after a redeploy.
+The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `NODE_ENV=production`. Changing a variable only takes effect after a redeploy.
+
+`FRONTEND_URL` is optional. The API always accepts requests from its own domain, which covers production, previews and per-deployment URLs. List other origins in `FRONTEND_URL` (comma-separated) only when they need to call it, for example `http://localhost:5174` in development. Any other origin gets a 403.
 
 ## Tests
 
