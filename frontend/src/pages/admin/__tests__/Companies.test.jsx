@@ -7,6 +7,13 @@ import * as companiesApi from '../../../api/companies.api';
 
 vi.mock('../../../api/companies.api', () => ({ listCompanies: vi.fn(), updateCompany: vi.fn() }));
 vi.mock('../../../api/audit.api', () => ({ getEntityHistory: vi.fn().mockResolvedValue([]) }));
+vi.mock('../../../api/settings.api', () => ({
+  getSyncSchedule: vi.fn().mockResolvedValue({
+    office_days: [1, 2, 3, 4, 5, 6], office_start: '09:00', office_end: '20:00', light_every_minutes: 60,
+    heavy_after: '19:30', backfill_in_office_hours: false, updated_at: null, updated_by_name: null,
+  }),
+  updateSyncSchedule: vi.fn(),
+}));
 
 const row = (overrides) => ({
   id: 1, guid: 'e91b4596-e709', name: 'Roymax Products LLP ( Maharashtra )', code: 'MH', state_name: 'Maharashtra',

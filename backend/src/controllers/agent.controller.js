@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { SYNC_FROM } = require('../config/env');
 const { logAction } = require('../services/auditLog.service');
 const { codeForState, syncShape } = require('../services/tallyCompany');
+const { loadSettings, scheduleOf } = require('../services/syncSettings');
 
 // The Connector API (/api/agent/*, Connector token only -- routes/agent.routes.js).
 // One sync of one company is a run:
@@ -60,7 +61,7 @@ const chunks = (list, size) => {
 //
 // Lists every company the Connector reports (a new GUID becomes a new row,
 // sync off) and answers with the companies whose sync is ON, which are the
-// only ones the Connector may read.
+// only ones the Connector may read, and with the sync schedule an Admin set.
 async function heartbeat(req, res, next) {
   try {
     const body = req.body || {};
@@ -130,15 +131,18 @@ async function heartbeat(req, res, next) {
       throw err;
     }
 
-    const { rows } = await db.execute(
-      `SELECT c.id, c.guid, c.name, c.code, s.*
-         FROM tally_companies c LEFT JOIN tally_sync_state s ON s.company_id = c.id
-        WHERE c.sync_enabled = 1
-        ORDER BY c.code, c.name`,
-    );
+    const [{ rows }, settings] = await Promise.all([
+      db.execute(
+        `SELECT c.id, c.guid, c.name, c.code, s.*
+           FROM tally_companies c LEFT JOIN tally_sync_state s ON s.company_id = c.id
+          WHERE c.sync_enabled = 1
+          ORDER BY c.code, c.name`,
+      ),
+      loadSettings(db),
+    ]);
     res.json({
       companies: rows.map((r) => ({ id: Number(r.id), guid: r.guid, name: r.name, code: r.code, sync: syncShape(r) })),
-      settings: { syncFrom: SYNC_FROM },
+      settings: { syncFrom: SYNC_FROM, schedule: scheduleOf(settings) },
       commands: [],
     });
   } catch (err) { sendError(res, next, err); }

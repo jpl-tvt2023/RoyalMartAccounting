@@ -9,7 +9,9 @@ const {
 } = require('../src/tally/requests');
 const { parseXml } = require('../src/tally/parse');
 const { voucherListFrom, sysInfoFrom, voucherFrom } = require('../src/tally/normalize');
-const { loadConfig, defaultConfigFile, DEFAULTS } = require('../src/connectorConfig');
+const {
+  loadConfig, defaultConfigFile, applySchedule, describeSchedule, DEFAULTS,
+} = require('../src/connectorConfig');
 const { createLogger, redact } = require('../src/logger');
 const { dueKind } = require('../src/cli');
 const { createMockTally } = require('../mock/server');
@@ -217,6 +219,28 @@ describe('connector.json', () => {
     expect(defaultConfigFile({ env: { ProgramData: programData }, platform: 'linux' })).toBe(path.resolve(__dirname, '..', 'connector.json'));
     const { config } = loadConfig({ env: { ProgramData: programData }, platform: 'win32' });
     expect(config.logDir).toBe(path.join(programData, 'RAMS', 'logs'));
+  });
+});
+
+describe("the sync schedule from RAMS", () => {
+  const fromRams = {
+    officeHours: { days: [1, 2, 3, 4, 5], start: '10:00', end: '18:30' },
+    lightEveryMinutes: 30, heavyAfter: '18:45', backfillInOfficeHours: false,
+  };
+
+  test("RAMS's schedule replaces connector.json's; without one, the file's stands", () => {
+    const cfg = { ...DEFAULTS, token: 'kept', batchSize: 80 };
+    expect(applySchedule(cfg, fromRams)).toMatchObject({ ...fromRams, token: 'kept', batchSize: 80 });
+    expect(applySchedule(cfg, null)).toBe(cfg);
+    expect(describeSchedule(DEFAULTS)).toBe('Mon–Sat 09:00–20:00, light sync every 60 min, end-of-day check after 19:30');
+    // Only the days sent: the times stay as they were.
+    expect(describeSchedule(applySchedule(cfg, { ...fromRams, officeHours: { days: [1, 3, 5] } })))
+      .toBe('Mon, Wed, Fri 09:00–20:00, light sync every 30 min, end-of-day check after 18:45');
+  });
+
+  test('a schedule this Connector cannot use is refused, naming the problem', () => {
+    expect(() => applySchedule(DEFAULTS, { ...fromRams, heavyAfter: 'late' }))
+      .toThrow(/RAMS sent a sync schedule this Connector cannot use \(heavyAfter must be HH:MM\)/);
   });
 });
 

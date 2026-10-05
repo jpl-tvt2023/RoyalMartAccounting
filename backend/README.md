@@ -2,7 +2,7 @@
 
 The RAMS API: Node 20, Express 5 (CommonJS), `@libsql/client` with raw SQL, the same stack and conventions as the ROMS backend, copied rather than shared.
 
-It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/sync/status` and `/api/health`. The Connector uses `/api/agent/*` (see below).
+It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/sync/status` and `/api/health`. The Connector uses `/api/agent/*` (see below).
 
 ## Run it locally
 
@@ -39,11 +39,15 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - Every write is idempotent on (company, Tally GUID).
   - A voucher older than the stored copy (lower AlterID) is skipped.
   - Watermarks move only when a run finishes ok (`controllers/agent.controller.js`).
-- **The tables** (migrations 004–008):
+- **The tables** (migrations 004–009):
   - `tally_companies`, `agents`, `tally_sync_state`, `tally_sync_runs`
   - the masters (`tally_groups`, `tally_ledgers`, `tally_stock_items`, `tally_voucher_types`)
   - `tally_vouchers` with its ledger lines, bill allocations, inventory lines and Buyer's Order Nos
   - money is whole paise; deleted Tally records get `deleted_at`
+- **The sync schedule is data too** (migration 009, `sync_settings`):
+  - it covers office days and hours, the light-sync interval, the end-of-day check time, and whether a backfill may run in office hours
+  - Admin/Owner change it with `PUT /api/settings/sync` (the *Sync schedule* panel, audited)
+  - the Connector gets it in every heartbeat reply (`settings.schedule`)
 - **`RAMS_SYNC_FROM`** (default `2026-06-08`, ROMS go-live) is the first day mirrored. Changing it later needs a resync of each company.
 
 ## On Vercel

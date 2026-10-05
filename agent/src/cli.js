@@ -11,7 +11,7 @@ const { buildProfile } = require('./probe/profile');
 const { readRomsRefs, resolveRomsConnection } = require('./roms/refs');
 const { summarizeRefs, renderRefsSummary } = require('./roms/summary');
 const { analyze, writeAnalysis } = require('./analyze');
-const { loadConfig } = require('./connectorConfig');
+const { loadConfig, describeSchedule } = require('./connectorConfig');
 const { createLogger } = require('./logger');
 const { createApiClient } = require('./api/client');
 const { createDryRunApi } = require('./api/dryRun');
@@ -211,7 +211,8 @@ const commands = {
       : `Tally ${tally.where}: NOT answering — ${t.message}`);
     const server = await service.heartbeat();
     if (!server) throw new Error(service.state.lastError);
-    log(`RAMS ${api.where}: answering. Sync starts ${server.settings.syncFrom}.\n`);
+    log(`RAMS ${api.where}: answering. Sync starts ${server.settings.syncFrom}.`);
+    log(`Sync schedule${server.settings.schedule ? ' (set in RAMS)' : ' (connector.json; RAMS sent none)'}: ${describeSchedule(service.state.cfg)}\n`);
     const on = new Map(server.companies.map((c) => [c.guid, c]));
     const rows = server.companies.map((c) => {
       const live = service.state.live.find((l) => l.guid === c.guid);

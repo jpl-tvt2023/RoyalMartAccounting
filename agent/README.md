@@ -47,11 +47,21 @@ Measured on TallyPrime 7.1 Educational (dev PC, MH/HR/WB copy, 2026-10-05):
 | Light sync, nothing changed | 1 s | |
 | End-of-day check, all three | 9 s | |
 
-### Settings (`connector.json`)
-- `officeHours` (Mon–Sat 09:00–20:00 on the PC's clock), `lightEveryMinutes` (60), `heavyAfter` (`19:30`)
-- `backfillInOfficeHours` (false)
+### Settings
+**The sync schedule is set in RAMS**, by an Admin or Owner under **Admin → Tally companies → Sync schedule** (audited). It covers:
+- office days and hours, on the office PC's clock
+- how often the light sync checks
+- when the end-of-day check runs
+- whether a backfill may run during office hours
+
+The Connector picks up a change at its next heartbeat, within a minute, and `status` shows the schedule in force. The same keys in `connector.json` (`officeHours`, `lightEveryMinutes`, `heavyAfter`, `backfillInOfficeHours`) only stand in until RAMS has answered once.
+
+`connector.json` itself holds:
+- `apiUrl` and `token`
+- `tally` (host, port, timeout, encoding)
 - `batchSize` (100 vouchers per request, at most 250)
-- `tally` (host, port, timeout, encoding), `logDir`, `keepLogDays` (14)
+- `heartbeatSeconds`, `tallyCheckMinutes`
+- `logDir`, `keepLogDays` (14)
 
 The log is one file per day, and the token is never written to it.
 

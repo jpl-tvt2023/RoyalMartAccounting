@@ -8,6 +8,7 @@
 const { listCompanies, pullSysInfo } = require('./tally/pull');
 const { syncCompany } = require('./sync');
 const { decide } = require('./sync/scheduler');
+const { applySchedule, describeSchedule } = require('./connectorConfig');
 const { todayIso } = require('./util');
 const { version } = require('../package.json');
 
@@ -26,6 +27,8 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
     lastHeartbeat: 0,
     lastLight: new Map(),
     typesCache: new Map(),
+    // The settings in force: connector.json with RAMS's sync schedule laid over.
+    cfg,
   };
   // lastError is "Tally: …", "RAMS: …" or "<company>: …", and is cleared once
   // that same thing works again.
@@ -85,10 +88,27 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
         lastError: state.lastError,
       });
       recovered('RAMS');
+      useSchedule(state.server.settings && state.server.settings.schedule);
     } catch (e) {
       fail(`RAMS: ${e.message}`);
     }
     return state.server;
+  }
+
+  // An Admin's change to the schedule in RAMS takes effect at the next heartbeat.
+  function useSchedule(schedule) {
+    let next;
+    try {
+      next = applySchedule(cfg, schedule);
+    } catch (e) {
+      fail(`RAMS: ${e.message}`);
+      return;
+    }
+    if (describeSchedule(next) !== describeSchedule(state.cfg) || !state.scheduleLogged) {
+      log(`Sync schedule${schedule ? ' from RAMS' : ''}: ${describeSchedule(next)}`);
+      state.scheduleLogged = true;
+    }
+    state.cfg = next;
   }
 
   // One pass: check Tally, report, then run what is due, one company at a time.
@@ -100,7 +120,7 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
     for (const company of state.server.companies) {
       let live = state.live.find((c) => c.guid === company.guid);
       const ask = () => decide({
-        now: now(), cfg, sync: company.sync, live, lastLightCheck: state.lastLight.get(company.guid) || null,
+        now: now(), cfg: state.cfg, sync: company.sync, live, lastLightCheck: state.lastLight.get(company.guid) || null,
       });
       let decision = ask();
       if (decision.kind || decision.checked) {

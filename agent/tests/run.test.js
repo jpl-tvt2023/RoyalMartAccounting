@@ -12,15 +12,14 @@ const describeIf = hasBackend ? describe : describe.skip;
 jest.setTimeout(180000);
 
 // Today on this PC's clock at hh:mm. RAMS stamps runs with the real time, so
-// the fake clock stays on today's date. Office hours every day, 09:00-20:00,
-// and the end-of-day check after 23:59 so it never falls due by accident.
+// the fake clock stays on today's date.
 const at = (hh, mm = 0) => { const d = new Date(); d.setHours(hh, mm, 0, 0); return d; };
-const cfg = {
-  ...DEFAULTS,
-  officeHours: { days: [0, 1, 2, 3, 4, 5, 6], start: '09:00', end: '20:00' },
-  heavyAfter: '23:59',
-  batchSize: 50,
-};
+// connector.json's schedule (Mon-Sat, end-of-day after 19:30) is only a
+// fallback: the schedule in force comes from RAMS -- here every day,
+// 09:00-20:00, and the end-of-day check after 23:59 so it never falls due by
+// accident.
+const cfg = { ...DEFAULTS, batchSize: 50 };
+const setSchedule = (sql) => rams.db.execute(`UPDATE sync_settings SET ${sql} WHERE id = 1`);
 
 let rams;
 let mock;
@@ -32,6 +31,7 @@ const runsCount = async () => Number((await rams.one('SELECT COUNT(*) AS n FROM 
 describeIf('rams-connector run', () => {
   beforeAll(async () => {
     rams = await startRams({ name: 'run' });
+    await setSchedule("office_days = '0,1,2,3,4,5,6', heavy_after = '23:59'");
     books = editBooks(buildDataset());
     mock = await startMockTally(books.dataset);
     clock = at(5);
@@ -56,6 +56,9 @@ describeIf('rams-connector run', () => {
     expect(mock.requests.filter((r) => /vouchers|list of accounts/i.test(r.id))).toEqual([]);
     const agent = await rams.one('SELECT status, version FROM agents WHERE last_seen_at IS NOT NULL');
     expect(JSON.parse(agent.status).tally).toMatchObject({ reachable: true, educational: false, licensed: true });
+    // The schedule in force is RAMS's, not connector.json's.
+    expect(service.state.cfg).toMatchObject({ heavyAfter: '23:59', officeHours: { days: [0, 1, 2, 3, 4, 5, 6] } });
+    expect(cfg.heavyAfter).toBe('19:30');
   });
 
   test('after an Admin turns companies on, the backfill runs outside office hours, not during them', async () => {
@@ -95,9 +98,10 @@ describeIf('rams-connector run', () => {
 
   test('the end-of-day check runs once its time has passed, and once only', async () => {
     // On the real clock here, because RAMS stamps the check with the real time.
+    // An Admin moves the end-of-day time in RAMS; the next heartbeat brings it.
     const real = new Date();
     const due = new Date(real.getTime() - 2 * 60000);
-    cfg.heavyAfter = `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`;
+    await setSchedule(`heavy_after = '${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}'`);
     await rams.db.execute("UPDATE tally_sync_state SET last_heavy_at = datetime('now', '-2 days')");
     clock = real;
     const results = await service.cycle();
