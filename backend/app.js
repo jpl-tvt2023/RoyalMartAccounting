@@ -20,16 +20,33 @@ app.set('trust proxy', 1);
 // root vercel.json.
 app.use(helmet());
 
+// Which browser origins may call the API with credentials:
+//   - the API's own domain, always. On Vercel the web app and the API share one
+//     domain (root vercel.json), and that holds for production, every preview
+//     and every per-deployment URL alike, none of which can be listed ahead
+//   - anything listed in FRONTEND_URL (comma-separated), e.g. the Vite dev
+//     server on http://localhost:5174
+// Anything else is refused with a 403, not passed on.
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5174')
   .split(',')
-  .map((s) => s.trim());
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) cb(null, true);
-    else cb(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
+function isOwnHost(req, origin) {
+  let host;
+  try { host = new URL(origin).host; } catch { return false; }
+  return [req.get('x-forwarded-host'), req.get('host')]
+    .filter(Boolean)
+    .flatMap((h) => h.split(',').map((s) => s.trim()))
+    .includes(host);
+}
+
+app.use(cors((req, cb) => {
+  const origin = req.get('origin');
+  if (!origin || allowedOrigins.includes(origin) || isOwnHost(req, origin)) {
+    return cb(null, { origin: true, credentials: true });
+  }
+  return cb(Object.assign(new Error('This origin is not allowed to call the RAMS API'), { status: 403 }));
 }));
 app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
