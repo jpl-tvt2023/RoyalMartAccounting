@@ -34,8 +34,9 @@ function companiesXml(companies) {
   return envelope(`<COLLECTION>${rows}</COLLECTION>`, `<CMPINFO><COMPANY>0</COMPANY><GROUP>0</GROUP><LEDGER>0</LEDGER></CMPINFO>`);
 }
 
-function groupXml(g) {
-  return `<GROUP NAME="${esc(g.name)}" RESERVEDNAME="${esc(g.reserved)}">${parentTag(g.parent)}<ISBILLWISEON>No</ISBILLWISEON>${nameList([g.name])}</GROUP>`;
+function groupXml(g, i) {
+  return `<GROUP NAME="${esc(g.name)}" RESERVEDNAME="${esc(g.reserved)}"><GUID>group-${i}</GUID>${parentTag(g.parent)}`
+    + `<ISBILLWISEON>No</ISBILLWISEON><ALTERID> ${g.alterId ?? i + 1}</ALTERID>${nameList([g.name])}</GROUP>`;
 }
 
 function ledgerXml(l, style, i) {
@@ -49,7 +50,7 @@ function ledgerXml(l, style, i) {
   const billWise = /debtors|creditors|marketplaces|branch/i.test(l.parent);
   return `<LEDGER NAME="${esc(l.name)}" RESERVEDNAME="">`
     + `<GUID>ledger-${i}</GUID>${parentTag(l.parent)}<CURRENCYNAME>₹</CURRENCYNAME>`
-    + `<ISBILLWISEON>${yn(billWise)}</ISBILLWISEON><ALTERID> ${i + 10}</ALTERID><MASTERID> ${i + 1}</MASTERID>`
+    + `<ISBILLWISEON>${yn(billWise)}</ISBILLWISEON><ALTERID> ${l.alterId ?? i + 10}</ALTERID><MASTERID> ${i + 1}</MASTERID>`
     + `${gst}${nameList([l.name])}</LEDGER>`;
 }
 
@@ -68,7 +69,7 @@ function voucherTypeXml(t, i) {
 
 function mastersXml(company, accountType) {
   const t = String(accountType).toLowerCase();
-  if (t === 'groups') return envelope(messages(company.groups.map(groupXml)));
+  if (t === 'groups') return envelope(messages(company.groups.map((g, i) => groupXml(g, i))));
   if (t === 'ledgers') return envelope(messages(company.ledgers.map((l, i) => ledgerXml(l, company.ledgerStyle, i))));
   if (t === 'stock items') return envelope(messages(company.stockItems.map(stockItemXml)));
   if (t === 'voucher types') return envelope(messages(company.voucherTypes.map(voucherTypeXml)));
@@ -121,9 +122,23 @@ function voucherXml(v, company) {
     + '</VOUCHER>';
 }
 
-function dayBookXml(company, from, to) {
-  const inRange = company.vouchers.filter((v) => (!from || v.date >= from) && (!to || v.date <= to));
+// The vouchers in a period, optionally only those altered after an AlterID
+// (the light sync's FILTER).
+function dayBookXml(company, from, to, { afterAlterId = null } = {}) {
+  const inRange = company.vouchers.filter((v) => (!from || v.date >= from) && (!to || v.date <= to)
+    && (afterAlterId == null || v.alterId > afterAlterId));
   return envelope(messages(inRange.map((v) => voucherXml(v, company))));
 }
 
-module.exports = { companiesXml, mastersXml, dayBookXml, errorXml, voucherXml };
+// The licence check report: one ROW per loaded company. Educational mode
+// echoes the 1st instead of the 15th it was asked for, as TallyPrime 7.1 does.
+function sysInfoXml(companies, { educational = false, from = '' } = {}) {
+  const [y, m, d] = (from || '2026-04-15').split('-');
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const echo = `${educational ? 1 : Number(d)}-${MONTHS[Number(m) - 1]}-${y.slice(2)}`;
+  const rows = companies.map((c) => `<ROW>${tag('NAME', c.name)}${tag('EDUCATIONAL', yn(educational))}`
+    + `${tag('LICENSED', yn(!educational))}${tag('FROMDATE', echo)}</ROW>`).join('');
+  return `<RAMSSYSINFO>${rows}</RAMSSYSINFO>`;
+}
+
+module.exports = { companiesXml, mastersXml, dayBookXml, sysInfoXml, errorXml, voucherXml };

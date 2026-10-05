@@ -1,6 +1,68 @@
-# RAMS Connector — Phase 0
+# RAMS Connector
 
-Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes to it**. Every request is an `Export`. Phase 0 answers the decision-gate questions from real data before RAMS writes anything into ROMS:
+Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes to it**. Every request is an `Export`. It does two jobs:
+- **Sync (M3):** keeps RAMS's copy of the Tally books current. It runs a light sync hourly in office hours, an end-of-day check, and a backfill from ROMS go-live.
+- **Phase 0 probe:** one-off analysis, described further down.
+
+## Sync (M3)
+
+### Setup on the dev PC
+1. **Get a token.** An Admin makes a Connector token against the RAMS database: `cd backend && npm run agent-token -- --name "Dev PC"`. It's shown once.
+2. **Write the config.** Copy `connector.example.json` to `connector.json` and set `apiUrl` and `token`. The file is gitignored.
+   - On the office PC it lives in `%ProgramData%\RAMS\connector.json`, with logs in `%ProgramData%\RAMS\logs` (M8).
+   - `RAMS_API_URL` / `RAMS_API_TOKEN` override the file.
+3. **Introduce the companies.** Run `node src/cli.js status`. RAMS lists every company loaded in Tally, each with **sync off**.
+4. **Turn companies on.** An Admin or Owner turns on the ones to mirror in RAMS under **Admin → Tally companies**. Companies are created in Tally; RAMS only chooses which ones to sync.
+5. **Start it.** Run `node src/cli.js run` for the service, or `node src/cli.js sync` for one sync now.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `run` | The service. A heartbeat every minute, a light sync hourly in office hours, the end-of-day check after `heavyAfter`, and the backfill outside office hours. Errors are logged and retried; it never exits on one. |
+| `sync [--company MH] [--kind light\|heavy\|backfill\|resync]` | One sync now, then exit. Without `--kind` it does what is due. |
+| `sync --dry-run [--from YYYY-MM-DD] [--out DIR]` | A backfill written to files instead of RAMS. Nothing is sent. |
+| `status` | What RAMS knows (watermarks, backfill) next to Tally's counters now. |
+
+### How a sync works
+- **Light:**
+  - One cheap request reads each company's `AltVchId`/`AltMstId`. If they're unchanged, nothing else is asked of Tally.
+  - Otherwise it pulls the masters (if `AltMstId` moved), then only the vouchers with `$AlterID >` the watermark, using a Voucher collection with a TDL `FILTER`.
+- **End of day (heavy):**
+  - a light sync and the full master lists
+  - then each month's GUID + AlterID list, so RAMS marks vouchers deleted in Tally
+  - a month where RAMS lacks a voucher or holds an older copy is pulled again
+- **Backfill / resync:**
+  - month by month from the sync start (RAMS's `RAMS_SYNC_FROM`, ROMS go-live by default) to 31 March of this financial year
+  - each month is pushed, then reconciled; RAMS records it, so an interrupted backfill resumes after the last finished month
+  - a resync is the same from scratch; it runs after a restored backup (counters went backward) or a ledger/item rename
+- **Watermarks:** they live in RAMS and move only when a run finishes ok, to the counters Tally had when it started. Anything altered during a run is fetched next time.
+- **Educational mode:** periods are widened to the 1st, 2nd or 31st and trimmed (`eduSafeRange`), and the heartbeat reports the licence mode.
+
+Measured on TallyPrime 7.1 Educational (dev PC, MH/HR/WB copy, 2026-10-05):
+
+| Run | Time | Detail |
+|---|---|---|
+| Backfill, all three | 4 min | MH 3,775 vouchers; it matches the Phase 0 probe voucher for voucher |
+| Light sync, nothing changed | 1 s | |
+| End-of-day check, all three | 9 s | |
+
+### Settings (`connector.json`)
+- `officeHours` (Mon–Sat 09:00–20:00 on the PC's clock), `lightEveryMinutes` (60), `heavyAfter` (`19:30`)
+- `backfillInOfficeHours` (false)
+- `batchSize` (100 vouchers per request, at most 250)
+- `tally` (host, port, timeout, encoding), `logDir`, `keepLogDays` (14)
+
+The log is one file per day, and the token is never written to it.
+
+### Tests
+`npm test` runs everything against the mock Tally.
+- `tests/sync.test.js` and `tests/run.test.js` drive the real RAMS API on a throwaway SQLite file (`tests/helpers/rams.js`), so `backend/` needs `npm install` too.
+- `mock/books.js` edits the mock's books the way an accountant would: alter, add, delete, rename a ledger, or restore an older backup.
+
+## Phase 0 — probe and analysis
+
+Phase 0 answers the decision-gate questions from real data before RAMS writes anything into ROMS:
 
 - Do Tally numbers contain `/`, which ROMS rejects? How do staff type them into ROMS today?
 - Does the Buyer's Order No find the ROMS PO? Does it agree with the Bill No?

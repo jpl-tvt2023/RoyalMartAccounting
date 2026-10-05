@@ -8,38 +8,13 @@
 const fs = require('fs');
 const path = require('path');
 const { findAll } = require('../tally/parse');
-const {
-  companiesRequest, mastersRequest, vouchersRequest, eduSafeRange, describeRequest, MASTER_TYPES,
-} = require('../tally/requests');
-const {
-  companiesFrom, groupsFrom, ledgersFrom, stockItemsFrom, voucherTypesFrom, baseTypeResolver, voucherFrom,
-} = require('../tally/normalize');
+const { describeRequest } = require('../tally/requests');
+const { baseTypeResolver } = require('../tally/normalize');
+const { listCompanies, pullMasters, pullPeriod } = require('../tally/pull');
 const { periods, slugify, writeJson } = require('../util');
 const store = require('./store');
 const { buildProfile } = require('./profile');
 const { version } = require('../../package.json');
-
-const MASTER_PARSERS = {
-  Groups: ['groups', groupsFrom, 'GROUP'],
-  Ledgers: ['ledgers', ledgersFrom, 'LEDGER'],
-  'Stock Items': ['stockItems', stockItemsFrom, 'STOCKITEM'],
-  'Voucher Types': ['voucherTypes', voucherTypesFrom, 'VOUCHERTYPE'],
-};
-
-async function listCompanies(client, raw) {
-  let request = companiesRequest();
-  let res;
-  try {
-    res = await client.post(request, { label: 'companies' });
-  } catch (e) {
-    if (e.code === 'UNREACHABLE') throw e;
-    // Retry with the FETCH list tally-database-loader ships with.
-    request = companiesRequest({ minimal: true });
-    res = await client.post(request, { label: 'companies (minimal)' });
-  }
-  if (raw) raw.save('companies.xml', request, res.text, describeRequest);
-  return companiesFrom(res.tree);
-}
 
 async function runProbe({
   client, outDir, from, to, only = [], chunkDays = null, keepRaw = false, log = () => {},
@@ -78,23 +53,26 @@ async function runProbe({
     saveRun();
     log(`\n${company.name}`);
 
-    const masters = { groups: [], ledgers: [], stockItems: [], voucherTypes: [] };
-    for (const accountType of MASTER_TYPES) {
-      const [key, parse, tag] = MASTER_PARSERS[accountType];
-      const request = mastersRequest({ company: company.name, accountType });
-      try {
-        const res = await client.post(request, { label: `${company.name}: ${accountType}` });
-        if (raw) raw.save(`${slug}/masters-${slugify(accountType)}.xml`, request, res.text, describeRequest);
-        masters[key] = parse(res.tree);
-        entry.masters[accountType] = masters[key].length;
-        store.writeSample(outDir, slug, `master-${slugify(accountType)}`, findAll(res.tree, tag).slice(0, 3));
-        log(`  ${accountType}: ${masters[key].length}`);
-      } catch (e) {
-        if (e.code === 'UNREACHABLE') { run.errors.push(e.message); saveRun(); throw e; }
-        entry.errors.push(`${accountType}: ${e.message}`);
-        log(`  ${accountType}: FAILED — ${e.message}`);
-      }
+    let pulled;
+    try {
+      pulled = await pullMasters(client, company, {
+        onResponse: ({ accountType, tag, request, res, list }) => {
+          if (raw) raw.save(`${slug}/masters-${slugify(accountType)}.xml`, request, res.text, describeRequest);
+          entry.masters[accountType] = list.length;
+          store.writeSample(outDir, slug, `master-${slugify(accountType)}`, findAll(res.tree, tag).slice(0, 3));
+          log(`  ${accountType}: ${list.length}`);
+        },
+      });
+    } catch (e) {
+      run.errors.push(e.message);
+      saveRun();
+      throw e;
     }
+    for (const err of pulled.errors) {
+      entry.errors.push(err);
+      log(`  ${err.replace(/^([^:]+): /, '$1: FAILED — ')}`);
+    }
+    const masters = { groups: [], ledgers: [], stockItems: [], voucherTypes: [], ...pulled.masters };
     store.writeMasters(outDir, slug, masters);
 
     const baseTypeOf = baseTypeResolver(masters.voucherTypes);
@@ -103,37 +81,32 @@ async function runProbe({
     const samples = new Map(); // voucher type → first raw objects
     const start = /^\d{4}-\d{2}-\d{2}$/.test(company.booksFrom) && company.booksFrom > from ? company.booksFrom : from;
     for (const p of start <= to ? periods(start, to, chunkDays) : []) {
-      const ask = eduSafeRange(p.from, p.to);
-      const request = vouchersRequest({ company: company.name, ...ask });
       try {
-        const res = await client.post(request, { label: `${company.name}: vouchers ${p.from}…${p.to}` });
-        if (raw) raw.save(`${slug}/vouchers-${p.from}_${p.to}.xml`, request, res.text, describeRequest);
+        const got = await pullPeriod(client, company, p, {
+          baseTypeOf,
+          onResponse: ({ request, res }) => {
+            if (raw) raw.save(`${slug}/vouchers-${p.from}_${p.to}.xml`, request, res.text, describeRequest);
+          },
+        });
+        const { stray, ask } = got;
         const fresh = [];
-        const stray = [];
-        for (const obj of findAll(res.tree, 'VOUCHER')) {
-          const v = voucherFrom(obj, { baseTypeOf });
-          if (v.date) {
-            // Outside what was asked for: Tally ignored the period.
-            if (v.date < ask.from || v.date > ask.to) { stray.push(v.date); continue; }
-            // Inside only because the period was widened: another period's.
-            if (v.date < p.from || v.date > p.to) continue;
-          }
+        got.vouchers.forEach((v, i) => {
           const key = v.guid || `${v.type}|${v.number}|${v.date}`;
-          if (seen.has(key)) continue;
+          if (seen.has(key)) return;
           seen.add(key);
           fresh.push(v);
           const list = samples.get(v.type) || [];
-          if (list.length < 2) samples.set(v.type, [...list, obj]);
-        }
+          if (list.length < 2) samples.set(v.type, [...list, got.objects[i]]);
+        });
         writer.write(fresh);
         entry.vouchers += fresh.length;
-        entry.periods.push({ ...p, vouchers: fresh.length, ms: res.ms, ...(stray.length ? { stray: stray.length } : {}) });
+        entry.periods.push({ ...p, vouchers: fresh.length, ms: got.ms, ...(stray.length ? { stray: stray.length } : {}) });
         if (stray.length) {
           const dates = [...new Set(stray)].sort();
           entry.errors.push(`Vouchers ${p.from}…${p.to}: Tally sent ${stray.length} dated outside ${ask.from}…${ask.to} `
             + `(${dates[0]} … ${dates[dates.length - 1]}) — it ignored the period asked for`);
         }
-        log(`  ${p.from} … ${p.to}: ${fresh.length} vouchers (${(res.ms / 1000).toFixed(1)}s)`
+        log(`  ${p.from} … ${p.to}: ${fresh.length} vouchers (${(got.ms / 1000).toFixed(1)}s)`
           + (stray.length ? ` — ${stray.length} outside the period DROPPED` : ''));
       } catch (e) {
         if (e.code === 'UNREACHABLE') { run.errors.push(e.message); saveRun(); throw e; }
