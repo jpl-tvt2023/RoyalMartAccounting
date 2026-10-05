@@ -12,6 +12,11 @@ const TITLES = [
   ['/admin/users', 'Users'],
   ['/admin/audit-log', 'Audit Log'],
   ['/admin/companies', 'Tally companies'],
+  ['/admin/permissions', 'Roles & permissions'],
+  ['/matching', 'Match review'],
+  ['/matching/rules', 'Matching rules'],
+  ['/matching/parties', 'Party ledgers'],
+  ['/help', 'Help & FAQ'],
 ];
 
 function resolveTitle(pathname) {

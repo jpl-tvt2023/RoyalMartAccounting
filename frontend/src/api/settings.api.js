@@ -12,3 +12,15 @@ export async function updateSyncSchedule(body) {
   const { data } = await api.put('/settings/sync', body);
   return data;
 }
+
+// Admin -> Roles & permissions (Admin/Owner): { catalog, roles, matrix,
+// updated_at, updated_by_name }. matrix is { Accountant: [keys], Viewer: [keys] }.
+export async function getPermissions() {
+  const { data } = await api.get('/settings/permissions');
+  return data;
+}
+
+export async function updatePermissions(roles) {
+  const { data } = await api.put('/settings/permissions', { roles });
+  return data;
+}

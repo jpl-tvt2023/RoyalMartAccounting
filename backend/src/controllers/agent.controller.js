@@ -3,6 +3,7 @@ const { SYNC_FROM } = require('../config/env');
 const { logAction } = require('../services/auditLog.service');
 const { codeForState, syncShape } = require('../services/tallyCompany');
 const { loadSettings, scheduleOf } = require('../services/syncSettings');
+const { runMatching, matchDue, lastMatch } = require('../matching/run');
 
 // The Connector API (/api/agent/*, Connector token only -- routes/agent.routes.js).
 // One sync of one company is a run:
@@ -13,6 +14,7 @@ const { loadSettings, scheduleOf } = require('../services/syncSettings');
 //   POST /runs/:id/vouchers         up to 250 vouchers
 //   POST /runs/:id/reconcile        a period's full GUID list from Tally
 //   POST /runs/:id/finish           {ok, errors, backfillDone}
+//   POST /match                     the matching run a heartbeat asked for
 //
 // Every write is idempotent on (company, Tally GUID), so the Connector may
 // resend anything. The watermarks move only in finish, on ok, to the counters
@@ -131,7 +133,7 @@ async function heartbeat(req, res, next) {
       throw err;
     }
 
-    const [{ rows }, settings] = await Promise.all([
+    const [{ rows }, settings, match, lastRun] = await Promise.all([
       db.execute(
         `SELECT c.id, c.guid, c.name, c.code, s.*
            FROM tally_companies c LEFT JOIN tally_sync_state s ON s.company_id = c.id
@@ -139,11 +141,16 @@ async function heartbeat(req, res, next) {
           ORDER BY c.code, c.name`,
       ),
       loadSettings(db),
+      matchDue(db),
+      lastMatch(db),
     ]);
     res.json({
       companies: rows.map((r) => ({ id: Number(r.id), guid: r.guid, name: r.name, code: r.code, sync: syncShape(r) })),
       settings: { syncFrom: SYNC_FROM, schedule: scheduleOf(settings) },
-      commands: [],
+      // RAMS has no clock of its own on Vercel: the Connector's minute
+      // heartbeat is asked to start a match when one is due.
+      commands: match.due ? [{ type: 'match', why: match.why }] : [],
+      matching: lastRun,
     });
   } catch (err) { sendError(res, next, err); }
 }
@@ -594,4 +601,15 @@ async function finish(req, res, next) {
   } catch (err) { sendError(res, next, err); }
 }
 
-module.exports = { heartbeat, startRun, masters, vouchers, reconcile, finish, MAX_VOUCHERS };
+// ------------------------------------------------------------------ match
+
+// POST /api/agent/match -- the Connector starting the matching run the
+// heartbeat asked for: read ROMS again, match, store what changed.
+async function match(req, res, next) {
+  try {
+    const out = await runMatching(db, { trigger: 'connector' });
+    res.json(out);
+  } catch (err) { sendError(res, next, err); }
+}
+
+module.exports = { heartbeat, startRun, masters, vouchers, reconcile, finish, match, MAX_VOUCHERS };

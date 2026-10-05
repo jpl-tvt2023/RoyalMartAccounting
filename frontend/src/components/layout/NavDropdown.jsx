@@ -50,6 +50,7 @@ export default function NavDropdown({ label, icon: Icon, items }) {
             <NavLink
               key={it.path}
               to={it.path}
+              end
               role="menuitem"
               className={({ isActive: active }) => `flex items-start gap-2.5 px-3 py-2 rounded-lg transition-colors ${active ? 'bg-brand/10' : 'hover:bg-gray-50'}`}
             >

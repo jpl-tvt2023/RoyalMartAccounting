@@ -7,12 +7,16 @@ import { HistoryButton } from '../shared/HistoryDrawer';
 import { getSyncSchedule, updateSyncSchedule } from '../../api/settings.api';
 import { formatDateTime } from '../../utils/formatters';
 import { DAYS, describeDays } from '../../utils/syncSchedule';
+import { useAuth } from '../../context/AuthContext';
+import { PERM } from '../../utils/roles';
 
 // When the Connector syncs, set here rather than on the office PC. It picks a
-// change up at its next heartbeat, within a minute. (Admin/Owner page.)
+// change up at its next heartbeat, within a minute. Editing needs the
+// sync.schedule permission.
 const inputCls = 'px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand';
 
 export default function SyncSchedulePanel() {
+  const { can } = useAuth();
   const [schedule, setSchedule] = useState(null);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -62,9 +66,11 @@ export default function SyncSchedulePanel() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <HistoryButton entityType="sync_settings" entityId={1} title="History — Sync schedule" />
-          <Button size="sm" variant="outline" disabled={!schedule} onClick={() => setForm({ ...schedule })}>
-            <Pencil size={14} /> Edit
-          </Button>
+          {can(PERM.SYNC_SCHEDULE) && (
+            <Button size="sm" variant="outline" disabled={!schedule} onClick={() => setForm({ ...schedule })}>
+              <Pencil size={14} /> Edit
+            </Button>
+          )}
         </div>
       </div>
 

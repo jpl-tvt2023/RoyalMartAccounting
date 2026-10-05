@@ -3,7 +3,7 @@ const { logAction, diffFields } = require('../services/auditLog.service');
 const { loadSettings, shape, validate } = require('../services/syncSettings');
 
 // The sync schedule: when the Connector syncs (office hours, the light sync
-// interval, the end-of-day check). Set here by an Admin or Owner rather than
+// interval, the end-of-day check). Set here (sync.schedule permission) rather than
 // in a file on the office PC; the Connector picks it up from its next
 // heartbeat, within a minute.
 
@@ -14,7 +14,7 @@ async function getSync(req, res, next) {
   } catch (err) { next(err); }
 }
 
-// PUT /api/settings/sync -- Admin/Owner. Any subset of the fields.
+// PUT /api/settings/sync -- the sync.schedule permission. Any subset of the fields.
 async function updateSync(req, res, next) {
   try {
     const current = await loadSettings(db);

@@ -1,6 +1,6 @@
 {
   "name": "rams-connector",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "RAMS Connector — reads TallyPrime over its local XML/HTTP port (never writes to it) and syncs it into RAMS. Phase 0 probe + analysis; M3 run/sync/status.",
   "main": "src/cli.js",

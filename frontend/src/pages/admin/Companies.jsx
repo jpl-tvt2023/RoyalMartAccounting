@@ -8,16 +8,23 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import Badge from '../../components/ui/Badge';
 import { HistoryButton } from '../../components/shared/HistoryDrawer';
 import SyncSchedulePanel from '../../components/settings/SyncSchedulePanel';
+import HelpLink from '../../components/shared/HelpLink';
+import { useAuth } from '../../context/AuthContext';
+import { PERM } from '../../utils/roles';
 import { listCompanies, updateCompany } from '../../api/companies.api';
 import { formatDateTime } from '../../utils/formatters';
 
-// Admin/Owner only. Companies are created in Tally by the accountants; the
+// Admin/Owner, and any role granted sync.companies or sync.schedule (Admin ->
+// Roles & permissions); each part's buttons show only with its own permission.
+// Companies are created in Tally by the accountants; the
 // Connector lists every company it finds loaded there, and this page chooses
 // which ones RAMS mirrors -- and, in the Sync schedule panel, when. Which
 // companies sync, and when, is data, never code.
 const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand';
 
 export default function Companies() {
+  const { can } = useAuth();
+  const canSync = can(PERM.SYNC_COMPANIES);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState(null); // { company, on }
@@ -49,7 +56,10 @@ export default function Companies() {
   return (
     <AppShell>
       <div className="mb-6 max-w-3xl">
-        <h1 className="text-2xl font-bold text-brand">Tally companies</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-brand">Tally companies</h1>
+          <HelpLink section="tally-companies" />
+        </div>
         <p className="text-gray-500 text-sm mt-1">
           Companies are created in Tally by the accountants. The Connector lists every company it finds loaded in Tally;
           turn sync on for the ones RAMS should mirror. Turning it off stops the sync and keeps what RAMS already holds.
@@ -93,12 +103,12 @@ export default function Companies() {
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDateTime(c.last_seen_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      {c.sync_enabled ? (
+                      {canSync && (c.sync_enabled ? (
                         <button onClick={() => setConfirm({ company: c, on: false })} title="Turn sync off" aria-label={`Turn sync off for ${c.name}`} className="p-1.5 rounded hover:bg-red-50 text-danger transition-colors"><PowerOff size={14} /></button>
                       ) : (
                         <button onClick={() => setConfirm({ company: c, on: true })} title="Turn sync on" aria-label={`Turn sync on for ${c.name}`} className="p-1.5 rounded hover:bg-green-50 text-green-600 transition-colors"><Power size={14} /></button>
-                      )}
-                      <button onClick={() => setEditing({ company: c, code: c.code || '' })} title="Edit code" aria-label={`Edit code for ${c.name}`} className="p-1.5 rounded hover:bg-blue-50 text-blue-500 transition-colors"><Pencil size={14} /></button>
+                      ))}
+                      {canSync && <button onClick={() => setEditing({ company: c, code: c.code || '' })} title="Edit code" aria-label={`Edit code for ${c.name}`} className="p-1.5 rounded hover:bg-blue-50 text-blue-500 transition-colors"><Pencil size={14} /></button>}
                       <HistoryButton entityType="tally_company" entityId={c.id} title={`History — ${c.name}`} />
                     </div>
                   </td>

@@ -2,6 +2,7 @@
 
 Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes to it**. Every request is an `Export`. It does two jobs:
 - **Sync (M3):** keeps RAMS's copy of the Tally books current. It runs a light sync hourly in office hours, an end-of-day check, and a backfill from ROMS go-live.
+- **Starting matching (M5):** RAMS on Vercel has no clock of its own, so when a heartbeat reply asks for a match (`commands: [{ type: 'match' }]`), the Connector calls `POST /api/agent/match`. RAMS then reads ROMS and matches. The Connector itself never talks to ROMS.
 - **Phase 0 probe:** one-off analysis, described further down.
 
 ## Sync (M3)
@@ -19,10 +20,10 @@ Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes t
 
 | Command | What it does |
 |---|---|
-| `run` | The service. A heartbeat every minute, a light sync hourly in office hours, the end-of-day check after `heavyAfter`, and the backfill outside office hours. Errors are logged and retried; it never exits on one. |
+| `run` | The service. A heartbeat every minute, a light sync hourly in office hours, the end-of-day check after `heavyAfter`, and the backfill outside office hours. At the end of a cycle, a matching run when RAMS asks for one. Errors are logged and retried; it never exits on one. |
 | `sync [--company MH] [--kind light\|heavy\|backfill\|resync]` | One sync now, then exit. Without `--kind` it does what is due. |
 | `sync --dry-run [--from YYYY-MM-DD] [--out DIR]` | A backfill written to files instead of RAMS. Nothing is sent. |
-| `status` | What RAMS knows (watermarks, backfill) next to Tally's counters now. |
+| `status` | What RAMS knows (watermarks, backfill) next to Tally's counters now, and the last matching run. |
 
 ### How a sync works
 - **Light:**

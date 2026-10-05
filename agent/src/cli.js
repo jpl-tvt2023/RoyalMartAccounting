@@ -229,6 +229,10 @@ const commands = {
       rows.push(['', live.name, 'off', `${live.altVchId} / ${live.altMstId}`, '', '', '', '']);
     }
     log(mdTable(['Code', 'Company', 'Sync', 'Tally AltVchId / AltMstId', 'RAMS watermarks', 'Backfill', 'Last light (UTC)', 'Last end-of-day (UTC)'], rows));
+    const m = server.matching;
+    log(m
+      ? `\nMatching: last run ${m.startedAt} UTC (${m.status})${m.po ? ` — ${m.po.linked} POs linked, ${m.po.review} need review, ${m.po.waiting} waiting for Tally` : ''}${m.error ? ` — ${m.error}` : ''}`
+      : '\nMatching: not run yet');
   },
 
   async ping(args) {

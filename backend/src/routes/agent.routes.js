@@ -11,5 +11,6 @@ router.post('/runs/:id/masters', c.masters);
 router.post('/runs/:id/vouchers', c.vouchers);
 router.post('/runs/:id/reconcile', c.reconcile);
 router.post('/runs/:id/finish', c.finish);
+router.post('/match', c.match);
 
 module.exports = router;
