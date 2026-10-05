@@ -46,7 +46,8 @@ describe('POST /api/agent/heartbeat', () => {
       version: '0.2.0', tally: { reachable: true, educational: true }, companies: [on, off],
     });
     expect(res.status).toBe(200);
-    expect(res.body.settings).toEqual({ syncFrom: '2026-06-08' });
+    expect(res.body.settings.syncFrom).toBe('2026-06-08');
+    expect(res.body.settings.schedule).toEqual(expect.objectContaining({ heavyAfter: expect.stringMatching(/^\d{2}:\d{2}$/) }));
     expect(res.body.commands).toEqual([]);
     const mine = res.body.companies.filter((c) => [on.guid, off.guid].includes(c.guid));
     expect(mine).toEqual([expect.objectContaining({ id: enabled.id, guid: on.guid, code: 'HR' })]);

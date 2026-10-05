@@ -7,12 +7,14 @@ import Button from '../../components/ui/Button';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import Badge from '../../components/ui/Badge';
 import { HistoryButton } from '../../components/shared/HistoryDrawer';
+import SyncSchedulePanel from '../../components/settings/SyncSchedulePanel';
 import { listCompanies, updateCompany } from '../../api/companies.api';
 import { formatDateTime } from '../../utils/formatters';
 
 // Admin/Owner only. Companies are created in Tally by the accountants; the
 // Connector lists every company it finds loaded there, and this page chooses
-// which ones RAMS mirrors. Which companies sync is data, never code.
+// which ones RAMS mirrors -- and, in the Sync schedule panel, when. Which
+// companies sync, and when, is data, never code.
 const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand';
 
 export default function Companies() {
@@ -54,6 +56,8 @@ export default function Companies() {
         </p>
         <p className="text-gray-500 text-sm mt-1">{syncing} syncing · {companies.length - syncing} not synced</p>
       </div>
+
+      <SyncSchedulePanel />
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">

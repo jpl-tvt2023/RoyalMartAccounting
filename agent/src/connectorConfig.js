@@ -6,6 +6,11 @@
 //   agent/connector.json                (the dev PC; gitignored)
 // RAMS_API_URL, RAMS_API_TOKEN, RAMS_TALLY_HOST and RAMS_TALLY_PORT override
 // the file. connector.example.json lists every setting.
+//
+// The sync SCHEDULE (office hours, light interval, end-of-day time, backfill
+// in office hours) is set by an Admin in RAMS and arrives with every
+// heartbeat reply (applySchedule). The file's values only stand in until RAMS
+// has answered once.
 const fs = require('fs');
 const path = require('path');
 
@@ -81,4 +86,35 @@ function loadConfig({ file = null, env = process.env, platform = process.platfor
   return { config: check(cfg), file: where, found };
 }
 
-module.exports = { loadConfig, defaultConfigFile, DEFAULTS };
+// The settings with RAMS's schedule (heartbeat reply settings.schedule) laid
+// over them. A missing schedule (an older RAMS) leaves them as they are; an
+// invalid one throws, and the caller keeps what it had.
+function applySchedule(cfg, schedule) {
+  if (!schedule) return cfg;
+  const merged = {
+    ...cfg,
+    officeHours: { ...cfg.officeHours, ...(schedule.officeHours || {}) },
+    lightEveryMinutes: schedule.lightEveryMinutes ?? cfg.lightEveryMinutes,
+    heavyAfter: schedule.heavyAfter ?? cfg.heavyAfter,
+    backfillInOfficeHours: schedule.backfillInOfficeHours ?? cfg.backfillInOfficeHours,
+  };
+  try {
+    return check(merged);
+  } catch (e) {
+    throw new Error(`RAMS sent a sync schedule this Connector cannot use (${e.message.replace(/^connector\.json: /, '')})`);
+  }
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// "Mon–Sat 09:00–20:00, light sync every 60 min, end-of-day check after 19:30"
+function describeSchedule(cfg) {
+  const days = [...cfg.officeHours.days].sort((a, b) => a - b);
+  const contiguous = days.every((d, i) => i === 0 || d === days[i - 1] + 1);
+  const dayText = contiguous && days.length > 2
+    ? `${DAY_NAMES[days[0]]}–${DAY_NAMES[days[days.length - 1]]}`
+    : days.map((d) => DAY_NAMES[d]).join(', ');
+  return `${dayText} ${cfg.officeHours.start}–${cfg.officeHours.end}, light sync every ${cfg.lightEveryMinutes} min, `
+    + `end-of-day check after ${cfg.heavyAfter}${cfg.backfillInOfficeHours ? ', backfill allowed in office hours' : ''}`;
+}
+
+module.exports = { loadConfig, defaultConfigFile, applySchedule, describeSchedule, DEFAULTS };

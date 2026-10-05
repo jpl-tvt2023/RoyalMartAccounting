@@ -48,7 +48,7 @@ export const NAV = [
         label: 'Tally companies',
         path: '/admin/companies',
         icon: Building2,
-        description: 'Which Tally companies RAMS syncs',
+        description: 'Which Tally companies RAMS syncs, and when',
         roles: ADMIN_ONLY,
       },
       {
