@@ -11,6 +11,7 @@ const TITLES = [
   ['/dashboard', null],
   ['/admin/users', 'Users'],
   ['/admin/audit-log', 'Audit Log'],
+  ['/admin/companies', 'Tally companies'],
 ];
 
 function resolveTitle(pathname) {

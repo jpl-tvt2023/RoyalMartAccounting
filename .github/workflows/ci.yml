@@ -20,7 +20,11 @@ jobs:
         with:
           node-version: 20
       - run: npm install --no-audit --no-fund
-      - run: npx jest
+      # The sync suites run the Connector against the real RAMS API
+      # (tests/helpers/rams.js), so the backend's packages are needed too.
+      - run: npm install --no-audit --no-fund
+        working-directory: backend
+      - run: npm test
 
   backend:
     name: API (backend)

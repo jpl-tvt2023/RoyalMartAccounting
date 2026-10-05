@@ -15,6 +15,10 @@
 //               discover where the accountant actually keeps each number.
 //               (The built-in DayBook report would be simpler, but TallyPrime
 //               7.1 exports it for one day only, whatever range is asked.)
+//   changed     The same, filtered to vouchers altered after an AlterID: the
+//               light sync.
+//   list        GUID, AlterID and date only: the end-of-day deletion check.
+//   sysinfo     A tiny report of Tally's licence mode, for the heartbeat.
 const { parseXml, findAll, txt } = require('./parse');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -106,6 +110,64 @@ function vouchersRequest({ company, from, to }) {
   });
 }
 
+// The light sync's request: the same voucher collection, but only vouchers
+// altered after `afterAlterId` (Tally's AltVchId when RAMS last synced). Checked
+// on TallyPrime 7.1: 27 changed vouchers came back in 1.5 s, none in 0.6 s.
+const CHANGED_COLLECTION = 'RAMS Changed Vouchers';
+function changedVouchersRequest({ company, from, to, afterAlterId }) {
+  const after = Number(afterAlterId);
+  if (!Number.isInteger(after) || after < 0) throw new Error(`Bad AlterID ${afterAlterId}`);
+  return envelope({
+    type: 'Collection',
+    id: CHANGED_COLLECTION,
+    vars: { SVCURRENTCOMPANY: company, SVFROMDATE: from, SVTODATE: to },
+    tdl: `<COLLECTION NAME="${CHANGED_COLLECTION}" ISMODIFY="No"><TYPE>Voucher</TYPE>`
+      + `<FETCH>${VOUCHER_LISTS.join(', ')}</FETCH><NATIVEMETHOD>*</NATIVEMETHOD>`
+      + '<FILTER>RAMSAlteredAfter</FILTER></COLLECTION>'
+      + `<SYSTEM TYPE="Formulae" NAME="RAMSAlteredAfter">$AlterID &gt; ${after}</SYSTEM>`,
+  });
+}
+
+// The end-of-day check's request: just each voucher's GUID, AlterID and date
+// in a period, to find what was deleted. A month of MH (1,179 vouchers) takes
+// 0.3 s.
+const LIST_COLLECTION = 'RAMS Voucher List';
+function voucherListRequest({ company, from, to }) {
+  return envelope({
+    type: 'Collection',
+    id: LIST_COLLECTION,
+    vars: { SVCURRENTCOMPANY: company, SVFROMDATE: from, SVTODATE: to },
+    tdl: `<COLLECTION NAME="${LIST_COLLECTION}" ISMODIFY="No"><TYPE>Voucher</TYPE>`
+      + '<FETCH>GUID, AlterID, Date</FETCH></COLLECTION>',
+  });
+}
+
+// The heartbeat's licence check: one row per loaded company carrying Tally's
+// licence flags, and SVFROMDATE echoed back. Educational mode swaps the 15th
+// for a date it accepts, which tells it apart even where the flags are blank.
+// (A report prints nothing to XML without the REPEAT and the XMLTAGs.)
+const SYSINFO_REPORT = 'RAMS SysInfo';
+const SYSINFO_PROBE_DAY = 15;
+function sysInfoRequest({ today }) {
+  const echo = `${today.slice(0, 8)}${SYSINFO_PROBE_DAY}`;
+  const field = (name, tag, formula) => `<FIELD NAME="${name}"><SET>${formula}</SET><XMLTAG>${tag}</XMLTAG></FIELD>`;
+  return envelope({
+    type: 'Data',
+    id: SYSINFO_REPORT,
+    vars: { SVFROMDATE: echo },
+    tdl: `<REPORT NAME="${SYSINFO_REPORT}"><FORMS>${SYSINFO_REPORT}</FORMS></REPORT>`
+      + `<FORM NAME="${SYSINFO_REPORT}"><PARTS>${SYSINFO_REPORT}</PARTS><XMLTAG>RAMSSYSINFO</XMLTAG></FORM>`
+      + `<PART NAME="${SYSINFO_REPORT}"><LINES>${SYSINFO_REPORT}</LINES>`
+      + `<REPEAT>${SYSINFO_REPORT} : RAMS SysInfo Companies</REPEAT><SCROLLED>Vertical</SCROLLED></PART>`
+      + `<LINE NAME="${SYSINFO_REPORT}"><FIELDS>RAMS SI Name, RAMS SI Edu, RAMS SI Licensed, RAMS SI Echo</FIELDS><XMLTAG>ROW</XMLTAG></LINE>`
+      + field('RAMS SI Name', 'NAME', '$Name')
+      + field('RAMS SI Edu', 'EDUCATIONAL', '$$LicenseInfo:IsEducationalMode')
+      + field('RAMS SI Licensed', 'LICENSED', '$$LicenseInfo:IsLicensedMode')
+      + field('RAMS SI Echo', 'FROMDATE', '##SVFromDate')
+      + '<COLLECTION NAME="RAMS SysInfo Companies"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION>',
+  });
+}
+
 // TallyPrime in Educational mode accepts only the 1st, 2nd and 31st as dates,
 // export periods included; any other date is silently swapped for the last one
 // it accepted. So a period is widened outward to such dates, and the probe
@@ -130,6 +192,7 @@ function describeRequest(xml) {
   const sv = findAll(tree, 'STATICVARIABLES')[0] || {};
   const vars = {};
   for (const [k, v] of Object.entries(sv)) if (!k.startsWith('@_')) vars[k.toUpperCase()] = txt(v);
+  const after = findAll(tree, 'SYSTEM').map((s) => /\$AlterID\s*>\s*(\d+)/i.exec(txt(s))).find(Boolean);
   const d = {
     type: txt(header.TYPE),
     id: txt(header.ID),
@@ -137,12 +200,14 @@ function describeRequest(xml) {
     accountType: vars.ACCOUNTTYPE || '',
     from: vars.SVFROMDATE ? isoFromTally(vars.SVFROMDATE) : '',
     to: vars.SVTODATE ? isoFromTally(vars.SVTODATE) : '',
+    afterAlterId: after ? Number(after[1]) : null,
   };
-  d.key = [d.type, d.id, d.company, d.accountType, d.from, d.to].join('|').toLowerCase();
+  d.key = [d.type, d.id, d.company, d.accountType, d.from, d.to, ...(after ? [d.afterAlterId] : [])].join('|').toLowerCase();
   return d;
 }
 
 module.exports = {
   tallyDateArg, isoFromTally, envelope, companiesRequest, mastersRequest, vouchersRequest, eduSafeRange,
-  describeRequest, MASTER_TYPES, COMPANY_COLLECTION, VOUCHER_COLLECTION,
+  changedVouchersRequest, voucherListRequest, sysInfoRequest, describeRequest,
+  MASTER_TYPES, COMPANY_COLLECTION, VOUCHER_COLLECTION, CHANGED_COLLECTION, LIST_COLLECTION, SYSINFO_REPORT, SYSINFO_PROBE_DAY,
 };

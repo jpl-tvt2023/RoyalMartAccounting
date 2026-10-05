@@ -55,6 +55,8 @@ function groupsFrom(tree) {
     name: field(g, 'NAME') || names(g)[0] || '',
     parent: txt(g.PARENT),
     reserved: field(g, 'RESERVEDNAME'),
+    guid: txt(g.GUID),
+    alterId: num(g.ALTERID),
   })).filter((g) => g.name);
 }
 
@@ -66,6 +68,7 @@ function voucherTypesFrom(tree) {
     numbering: txt(t.NUMBERINGMETHOD),
     active: !/^no$/i.test(txt(t.ISACTIVE)),
     guid: txt(t.GUID),
+    alterId: num(t.ALTERID),
   })).filter((t) => t.name);
 }
 
@@ -214,7 +217,8 @@ function inventoryLine(i, direction) {
   };
 }
 
-function voucherFrom(v, { baseTypeOf = () => 'Unknown' } = {}) {
+// docFields (the Phase 0 discovery index) is left out of what the sync sends.
+function voucherFrom(v, { baseTypeOf = () => 'Unknown', docFields = true } = {}) {
   const type = txt(v.VOUCHERTYPENAME) || field(v, 'VCHTYPE');
   const ledgerLines = firstNonEmpty(v, ['ALLLEDGERENTRIES.LIST', 'LEDGERENTRIES.LIST']).map(ledgerLine);
   const inventoryLines = [
@@ -250,7 +254,7 @@ function voucherFrom(v, { baseTypeOf = () => 'Unknown' } = {}) {
     orders,
     ledgerLines,
     inventoryLines,
-    docFields: docFieldsOf(v),
+    ...(docFields ? { docFields: docFieldsOf(v) } : {}),
   };
 }
 
@@ -258,8 +262,30 @@ function vouchersFrom(tree, ctx) {
   return findAll(tree, 'VOUCHER').map((v) => voucherFrom(v, ctx));
 }
 
+// The end-of-day check's list: { guid, alterId, date } per voucher.
+function voucherListFrom(tree) {
+  return findAll(tree, 'VOUCHER').map((v) => ({
+    guid: txt(v.GUID) || field(v, 'REMOTEID'),
+    alterId: num(v.ALTERID),
+    date: tallyDate(v.DATE),
+  })).filter((v) => v.guid);
+}
+
+// The licence check (requests.js sysInfoRequest): { educational, licensed },
+// each true / false / null when Tally left it blank. Educational mode also
+// gives itself away by swapping the 15th it was asked to echo.
+function sysInfoFrom(tree, { probeDay = 15 } = {}) {
+  const row = findAll(tree, 'ROW')[0];
+  if (!row) return { educational: null, licensed: null };
+  const flag = (v) => (/^yes$/i.test(txt(v)) ? true : /^no$/i.test(txt(v)) ? false : null);
+  let educational = flag(row.EDUCATIONAL);
+  const echoed = /^(\d{1,2})-/.exec(txt(row.FROMDATE)) || /^\d{6}(\d{2})$/.exec(txt(row.FROMDATE));
+  if (educational == null && echoed) educational = Number(echoed[1]) !== probeDay;
+  return { educational, licensed: flag(row.LICENSED) };
+}
+
 module.exports = {
   GSTIN_RE, panOf, BASE_TYPES, BLANKISH, present,
   companiesFrom, groupsFrom, voucherTypesFrom, ledgersFrom, stockItemsFrom,
-  baseTypeResolver, groupResolver, voucherFrom, vouchersFrom, docFieldsOf,
+  baseTypeResolver, groupResolver, voucherFrom, vouchersFrom, docFieldsOf, voucherListFrom, sysInfoFrom,
 };

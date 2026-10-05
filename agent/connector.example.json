@@ -1,0 +1,14 @@
+{
+  "apiUrl": "https://royalmartaccounting.vercel.app",
+  "token": "rams_... (from `npm run agent-token` in backend/, shown once)",
+  "tally": { "host": "127.0.0.1", "port": 9000, "timeoutSeconds": 300, "encoding": "utf16" },
+  "officeHours": { "days": [1, 2, 3, 4, 5, 6], "start": "09:00", "end": "20:00" },
+  "lightEveryMinutes": 60,
+  "heavyAfter": "19:30",
+  "backfillInOfficeHours": false,
+  "heartbeatSeconds": 60,
+  "tallyCheckMinutes": 5,
+  "batchSize": 100,
+  "logDir": "",
+  "keepLogDays": 14
+}

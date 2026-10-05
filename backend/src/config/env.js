@@ -16,7 +16,16 @@ for (const key of required) {
   }
 }
 
+// The first day of Tally books RAMS mirrors: ROMS go-live by default. Changing
+// it later needs a re-backfill of each company.
+const SYNC_FROM = process.env.RAMS_SYNC_FROM || '2026-06-08';
+if (!/^\d{4}-\d{2}-\d{2}$/.test(SYNC_FROM)) {
+  console.error(`RAMS_SYNC_FROM must be YYYY-MM-DD, got "${SYNC_FROM}"`);
+  process.exit(1);
+}
+
 module.exports = {
+  SYNC_FROM,
   PORT: process.env.PORT || 5001,
   NODE_ENV: process.env.NODE_ENV || 'development',
   JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,

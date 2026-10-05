@@ -1,4 +1,4 @@
-import { LayoutDashboard, Settings, Users, ScrollText } from 'lucide-react';
+import { LayoutDashboard, Settings, Users, ScrollText, Building2 } from 'lucide-react';
 
 // The RAMS role set. MIRRORED in backend/src/middleware/rbac.js and in
 // migration 002's CHECK -- change all three together; utils/__tests__/roles.test.js
@@ -42,6 +42,13 @@ export const NAV = [
         path: '/admin/users',
         icon: Users,
         description: 'Accounts, roles & access',
+        roles: ADMIN_ONLY,
+      },
+      {
+        label: 'Tally companies',
+        path: '/admin/companies',
+        icon: Building2,
+        description: 'Which Tally companies RAMS syncs',
         roles: ADMIN_ONLY,
       },
       {

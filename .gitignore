@@ -25,3 +25,7 @@ agent/tests/fixtures/recorded/
 # Builds of the Connector exe
 agent/dist/
 *.log
+
+# The Connector's settings hold its token. connector.example.json is the template.
+connector.json
+agent/tests/.tmp/
