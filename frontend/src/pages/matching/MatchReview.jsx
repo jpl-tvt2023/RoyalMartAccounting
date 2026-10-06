@@ -8,6 +8,8 @@ import Pagination, { loadPersistedPageSize, persistPageSize } from '../../compon
 import HelpLink from '../../components/shared/HelpLink';
 import MatchDetail, { OutcomeBadge } from '../../components/matching/MatchDetail';
 import { getMatchingSummary, listResults, runMatching } from '../../api/matching.api';
+import { getAutofillSummary } from '../../api/autofill.api';
+import { autofillStatus } from '../../utils/autofillText';
 import { useAuth } from '../../context/AuthContext';
 import { useSessionState } from '../../hooks/useSessionState';
 import { PERM } from '../../utils/roles';
@@ -50,6 +52,10 @@ export default function MatchReview() {
   const { can } = useAuth();
   const canRun = can(PERM.MATCHING_RUN);
   const canReview = can(PERM.MATCHING_REVIEW);
+  const canSeeFill = can(PERM.AUTOFILL_VIEW);
+  const canOverwrite = can(PERM.AUTOFILL_OVERWRITE);
+  // Each field's auto-fill mode, so a row can say where auto-fill is with it.
+  const [fillModes, setFillModes] = useState(null);
   const [filters, setFilters] = useSessionState('matchReview.filters', DEFAULT_FILTERS);
   const [search, setSearch] = useState(filters.q);
   const [page, setPage] = useState(1);
@@ -67,6 +73,10 @@ export default function MatchReview() {
 
   const loadSummary = useCallback(() => getMatchingSummary().then(setSummary).catch(() => toast.error('Failed to load matching')), []);
   useEffect(() => { loadSummary(); }, [loadSummary]);
+  useEffect(() => {
+    if (!canSeeFill) return;
+    getAutofillSummary().then((a) => setFillModes({ po: a.fields.po.mode, rtv: a.fields.rtv.mode })).catch(() => {});
+  }, [canSeeFill, tick]);
   useEffect(() => {
     let cancelled = false;
     const params = JSON.parse(request);
@@ -113,7 +123,8 @@ export default function MatchReview() {
         <p className="text-gray-500 text-sm mt-1">
           Each ROMS PO with the Tally invoice that billed it, and each RTV row with its credit note. Start with
           {' '}<strong>Needs review</strong>: open a row to see why, then confirm RAMS&apos;s answer or pick the right one.
-          RAMS doesn&apos;t write to ROMS yet — &ldquo;Auto-fill would write&rdquo; shows what it will.
+          The Auto-fill column shows what RAMS writes into ROMS for a linked row, and where it is with it
+          {canSeeFill ? <> (<Link to="/matching/autofill" className="text-brand hover:underline">Matching → Auto-fill</Link>)</> : null}.
         </p>
       </div>
 
@@ -197,8 +208,8 @@ export default function MatchReview() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 {(kind === 'po'
-                  ? ['PO', 'Vendor', 'Vendor PO No', 'Bill No in ROMS', 'Tally invoice', 'Status', 'Auto-fill would write']
-                  : ['RTV', 'Vendor', 'CN No in ROMS', 'Tally credit note', 'Status', 'Auto-fill would write']
+                  ? ['PO', 'Vendor', 'Vendor PO No', 'Bill No in ROMS', 'Tally invoice', 'Status', 'Auto-fill']
+                  : ['RTV', 'Vendor', 'CN No in ROMS', 'Tally credit note', 'Status', 'Auto-fill']
                 ).map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>)}
               </tr>
             </thead>
@@ -240,7 +251,9 @@ export default function MatchReview() {
                       <p className="text-xs text-blue-700 mt-1">Note: {r.notes.map((n) => CHECK_TEXT[n]?.label || n).join(', ')}</p>
                     )}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">{r.outcome === 'linked' ? fillText(r.fill) : ''}</td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {r.outcome === 'linked' && <FillCell row={r} mode={canSeeFill ? fillModes?.[r.kind] ?? null : undefined} />}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -258,8 +271,30 @@ export default function MatchReview() {
         />
       </div>
 
-      {open && <MatchDetail key={`${open.kind}:${open.id}`} target={open} onClose={() => setOpen(null)} onChanged={changed} canReview={canReview} />}
+      {open && (
+        <MatchDetail
+          key={`${open.kind}:${open.id}`}
+          target={open}
+          onClose={() => setOpen(null)}
+          onChanged={changed}
+          canReview={canReview}
+          fillMode={canSeeFill ? fillModes?.[open.kind] ?? null : undefined}
+          canOverwrite={canOverwrite}
+        />
+      )}
     </AppShell>
+  );
+}
+
+// What auto-fill writes for a linked row and, for whoever may see auto-fill
+// (mode !== undefined), where it is with it.
+function FillCell({ row, mode }) {
+  const status = mode === undefined ? null : autofillStatus(row, mode);
+  return (
+    <>
+      <p className="whitespace-nowrap">{fillText(row.fill)}</p>
+      {status && <p className={`text-xs mt-0.5 ${status.tone}`}>{status.text}</p>}
+    </>
   );
 }
 

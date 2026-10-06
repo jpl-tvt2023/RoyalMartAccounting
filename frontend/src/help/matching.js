@@ -10,7 +10,7 @@ export const matchReview = {
     {
       title: 'Understand the four statuses',
       steps: [
-        'Linked: RAMS found the Tally voucher, and every check passed. "Auto-fill would write" shows what RAMS will put into ROMS once auto-fill is switched on.',
+        'Linked: RAMS found the Tally voucher, and every check passed. The Auto-fill column shows what RAMS writes into ROMS for it, and whether it has (see Auto-fill into ROMS).',
         'Needs review: RAMS needs a person to decide. The reason says why: for example the Bill No typed in ROMS isn’t the invoice the Buyer’s Order No found.',
         'Waiting for Tally: nothing in Tally yet. Normal for a PO not invoiced yet, or for an invoice the accountant hasn’t entered.',
         'Not matched: left out on purpose. The vendor is set as a stock transfer, or the RTV row is one ROMS takes no CN No for.',
@@ -44,7 +44,7 @@ export const matchReview = {
     },
   ],
   faq: [
-    { q: 'Will RAMS change anything in ROMS?', a: 'Not yet. "Auto-fill would write" only shows what it would do. Writing into ROMS is switched on later, one field at a time, after a trial week.' },
+    { q: 'Will RAMS change anything in ROMS?', a: 'Only through auto-fill, and only the Bill No + Bill Date of a linked PO and the CN No + CN Date of a linked RTV row. Each field is Off until an Admin switches it on, on Matching → Auto-fill.' },
     { q: 'Why is a PO "Waiting for Tally" when it was dispatched?', a: 'The accountant hasn’t entered its invoice in Tally yet, or the invoice’s Buyer’s Order No is missing or different. Once the invoice is in Tally, the next match links it.' },
     { q: 'What does "Bill No differs" mean?', a: 'The Buyer’s Order No points at one invoice, but the Bill No typed in ROMS is a different number. Usually a typing mistake in ROMS, or an invoice that was cancelled and re-issued. Pick the right invoice.' },
     { q: 'What is the invoice’s serial?', a: 'The digits in its number: 607 for 607/RM/26-27. Staff often type just that into ROMS; RAMS understands it, and auto-fill writes the whole number.' },

@@ -32,6 +32,22 @@ const CATALOG = [
     description: 'Which marketplace each Tally party ledger belongs to',
   },
   {
+    key: 'autofill.view', area: 'Auto-fill', label: 'See auto-fill',
+    description: 'What RAMS will write into ROMS, what it wrote, and what ROMS refused',
+  },
+  {
+    key: 'autofill.approve', area: 'Auto-fill', label: 'Approve auto-fill',
+    description: 'Approve writes into ROMS, press "Write now", and try a refused one again',
+  },
+  {
+    key: 'autofill.overwrite', area: 'Auto-fill', label: 'Replace a different value in ROMS',
+    description: 'Write Tally\'s number over a Bill No or CN No staff typed that is not a form of it, one row at a time',
+  },
+  {
+    key: 'autofill.settings', area: 'Auto-fill', label: 'Switch auto-fill on or off',
+    description: 'Each field\'s mode (Off, Preview, Ask first, Automatic) and which Bill Date is kept',
+  },
+  {
     key: 'sync.companies', area: 'Tally sync', label: 'Turn company sync on or off',
     description: 'Choose which Tally companies RAMS syncs, and edit their short codes',
   },

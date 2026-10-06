@@ -3,8 +3,9 @@
 // Every minute it sends RAMS a heartbeat (is Tally answering, which companies
 // are loaded, their counters, what the Connector is doing, its last error) and
 // gets back the companies whose sync is on. Then, one company at a time, it
-// runs whatever the scheduler says is due, and last, if RAMS asked for one,
-// a matching run (RAMS on Vercel has no clock of its own). Nothing here ever
+// runs whatever the scheduler says is due, and last, if RAMS asked for them,
+// a matching run and then auto-fill into ROMS (RAMS on Vercel has no clock of
+// its own). Nothing here ever
 // exits on an error: it is logged, reported in the next heartbeat, and tried
 // again.
 const { listCompanies, pullSysInfo } = require('./tally/pull');
@@ -15,6 +16,9 @@ const { todayIso } = require('./util');
 const { version } = require('../package.json');
 
 const SYSINFO_EVERY_MS = 60 * 60000;
+// Auto-fill rounds per cycle: each is time-boxed on RAMS's side (about 30 s),
+// so this bounds one cycle while the first big catch-up runs.
+const AUTOFILL_MAX_ROUNDS = 20;
 const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 function createService({ cfg, tally, api, log = () => {}, now = () => new Date() }) {
@@ -160,7 +164,13 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
         state.activity = { state: 'idle' };
       }
     }
-    if ((state.server.commands || []).some((c) => c.type === 'match')) await match();
+    const wants = (type) => (state.server.commands || []).some((c) => c.type === type);
+    let fillDue = wants('autofill');
+    if (wants('match')) {
+      const out = await match();
+      if (out && out.autofill_due) fillDue = true;
+    }
+    if (fillDue) await autofill();
     return results;
   }
 
@@ -181,6 +191,41 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
       return out;
     } catch (e) {
       fail(`RAMS: matching failed — ${e.message}`);
+      return null;
+    } finally {
+      state.activity = { state: 'idle' };
+    }
+  }
+
+  // RAMS writes Tally's numbers into ROMS a round at a time; the Connector
+  // only starts each round, and asks again while RAMS says there is more.
+  async function autofill({ maxRounds = AUTOFILL_MAX_ROUNDS } = {}) {
+    const why = ((state.server.commands || []).find((c) => c.type === 'autofill') || {}).why;
+    state.activity = { state: 'autofill', since: now().toISOString() };
+    const total = {
+      written: 0, already: 0, refused: 0, checked: 0,
+    };
+    let last = null;
+    try {
+      for (let round = 1; round <= maxRounds; round++) {
+        last = await api.autofill();
+        if (last.skipped) break;
+        for (const k of Object.keys(total)) total[k] += (last.counts && last.counts[k]) || 0;
+        if (!last.ok || !last.more) break;
+      }
+      if (last && last.skipped) {
+        log(`Auto-fill: ${last.message}`);
+      } else if (last && !last.ok) {
+        fail(`RAMS: auto-fill stopped — ${last.error}`);
+      } else {
+        const left = last && last.remaining ? `, ${last.remaining} to go` : '';
+        log(`Auto-fill${why ? ` (${why})` : ''}: ${total.written} written into ROMS, ${total.refused} refused, ${total.checked} checked${left}`);
+        recovered('RAMS');
+      }
+      state.server.commands = (state.server.commands || []).filter((c) => c.type !== 'autofill');
+      return { ...total, last };
+    } catch (e) {
+      fail(`RAMS: auto-fill failed — ${e.message}`);
       return null;
     } finally {
       state.activity = { state: 'idle' };
@@ -208,7 +253,9 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
     }
   }
 
-  return { state, checkTally, heartbeat, cycle, match, runForever };
+  return {
+    state, checkTally, heartbeat, cycle, match, autofill, runForever,
+  };
 }
 
 module.exports = { createService };

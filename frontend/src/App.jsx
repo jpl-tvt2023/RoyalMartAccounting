@@ -14,6 +14,7 @@ import Permissions from './pages/admin/Permissions';
 import MatchReview from './pages/matching/MatchReview';
 import MatchingRules from './pages/matching/MatchingRules';
 import PartyLedgers from './pages/matching/PartyLedgers';
+import AutoFill from './pages/matching/AutoFill';
 import Help from './pages/Help';
 import { ALL_ROLES, ADMIN_ONLY, PERM } from './utils/roles';
 
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="/matching" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><MatchReview /></ProtectedRoute>} />
           <Route path="/matching/rules" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><MatchingRules /></ProtectedRoute>} />
           <Route path="/matching/parties" element={<ProtectedRoute permission={PERM.MATCHING_VIEW}><PartyLedgers /></ProtectedRoute>} />
+          <Route path="/matching/autofill" element={<ProtectedRoute permission={PERM.AUTOFILL_VIEW}><AutoFill /></ProtectedRoute>} />
           <Route path="/help" element={<ProtectedRoute roles={ALL_ROLES}><Help /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

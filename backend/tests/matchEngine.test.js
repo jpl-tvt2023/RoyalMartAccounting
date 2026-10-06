@@ -75,7 +75,7 @@ describe('finding the invoice for a PO', () => {
     const out = run({ pos: [po('B002', { vendor_po_id: 'P4588464', bill_no: '607' })], vouchers: [inv] });
     const r = result(out, 'B002');
     expect(r).toMatchObject({ outcome: 'linked', method: 'order_no', voucher_number: '607/RM/26-27', company_id: 1 });
-    expect(r.fill).toEqual({ field: 'bill_no', current: '607', value: '607/RM/26-27', date: '2026-07-01', kind: 'replace' });
+    expect(r.fill).toEqual({ field: 'bill_no', current: '607', current_date: null, value: '607/RM/26-27', date: '2026-07-01', kind: 'replace' });
     expect(out.links).toEqual([{ target_kind: 'po', target_id: 'B002', role: 'invoice', company_id: 1, voucher_guid: inv.guid, method: 'order_no' }]);
   });
 
@@ -327,6 +327,17 @@ describe("a person's decision wins", () => {
     expect(out.links).toEqual([]);
   });
 
+  test('a person may link a PO whose Bill No is not a form of the invoice: auto-fill calls that "differs", never "replace"', () => {
+    // The S292 kind: staff typed 1819, the order is on 1219, a person confirmed 1219.
+    const a = sale('1219/RM/26-27', { orders: ['P9'] });
+    const decisions = [{ target_kind: 'po', target_id: 'S292', company_id: 1, voucher_guid: a.guid, status: 'confirmed' }];
+    const out = run({ pos: [po('S292', { vendor_po_id: 'P9', bill_no: '1819', bill_date: '2026-09-02' })], vouchers: [a, sale('1819/RM/26-27')], decisions });
+    expect(result(out, 'S292')).toMatchObject({ outcome: 'linked', method: 'person', voucher_number: '1219/RM/26-27' });
+    expect(result(out, 'S292').fill).toEqual({
+      field: 'bill_no', current: '1819', current_date: '2026-09-02', value: '1219/RM/26-27', date: '2026-07-01', kind: 'differs',
+    });
+  });
+
   test('a confirmed invoice deleted in Tally is flagged', () => {
     const decisions = [{ target_kind: 'po', target_id: 'G1', company_id: 1, voucher_guid: 'gone', status: 'confirmed' }];
     expect(result(run({ pos: [po('G1')], decisions }), 'G1')).toMatchObject({ outcome: 'review', reason: 'confirmed_gone' });
@@ -342,7 +353,7 @@ describe('RTV rows and credit notes', () => {
     const out = run({ pos: [po('B1', { vendor_po_id: 'P1', ...onPage })], vouchers: [inv, cn], rtv: [{ id: 11, po_id: 'B1', rtv_no: 'RTV-11' }] });
     const r = result(out, 11, 'rtv');
     expect(r).toMatchObject({ outcome: 'linked', method: 'agst_ref', voucher_number: '835', po_id: 'B1' });
-    expect(r.fill).toEqual({ field: 'cn_number', current: null, value: '835', date: '2026-07-20', kind: 'fill' });
+    expect(r.fill).toEqual({ field: 'cn_number', current: null, current_date: null, value: '835', date: '2026-07-20', kind: 'fill' });
     expect(out.links).toContainEqual({ target_kind: 'rtv', target_id: '11', role: 'credit_note', company_id: 1, voucher_guid: cn.guid, method: 'agst_ref' });
 
     const off = run({ pos: [po('B1', { vendor_po_id: 'P1', ...onPage })], vouchers: [inv, cn], rtv: [{ id: 11, po_id: 'B1' }], settings: { cn_agst_ref: false } });
@@ -359,6 +370,29 @@ describe('RTV rows and credit notes', () => {
     const differs = run({ pos: [po('B1', { vendor_po_id: 'P1', ...onPage })], vouchers: [inv, cn], rtv: [{ id: 13, po_id: 'B1', cn_number: '999' }] });
     expect(result(differs, 13, 'rtv')).toMatchObject({ outcome: 'review', reason: 'cn_differs' });
     expect(result(differs, 13, 'rtv').detail.params).toMatchObject({ typed: '999', number: '835' });
+  });
+
+  test('what auto-fill would write for a CN: a typed form is replaced, a different number only after a person', () => {
+    const inv = sale('607/RM/26-27', { orders: ['P1'] });
+    const cn = creditNote('835', '607/RM/26-27');
+    const form = run({ pos: [po('B1', { vendor_po_id: 'P1', ...onPage })], vouchers: [inv, cn], rtv: [{ id: 14, po_id: 'B1', cn_number: '0835', cn_date: '2026-07-21' }] });
+    expect(result(form, 14, 'rtv')).toMatchObject({ outcome: 'linked' });
+    expect(result(form, 14, 'rtv').fill).toEqual({
+      field: 'cn_number', current: '0835', current_date: '2026-07-21', value: '835', date: '2026-07-20', kind: 'replace',
+    });
+
+    const decisions = [{ target_kind: 'rtv', target_id: '15', company_id: 1, voucher_guid: cn.guid, status: 'confirmed' }];
+    const person = run({ pos: [po('B1', { vendor_po_id: 'P1', ...onPage })], vouchers: [inv, cn], rtv: [{ id: 15, po_id: 'B1', cn_number: '999' }], decisions });
+    expect(result(person, 15, 'rtv')).toMatchObject({ outcome: 'linked', method: 'person' });
+    expect(result(person, 15, 'rtv').fill.kind).toBe('differs');
+  });
+
+  test('a Bill No already as in Tally is "same", and the fill still carries both dates', () => {
+    const inv = sale('607/RM/26-27', { orders: ['P1'], date: '2026-07-11' });
+    const out = run({ pos: [po('B1', { vendor_po_id: 'P1', bill_no: '607/RM/26-27', bill_date: '2026-07-13' })], vouchers: [inv] });
+    expect(result(out, 'B1').fill).toEqual({
+      field: 'bill_no', current: '607/RM/26-27', current_date: '2026-07-13', value: '607/RM/26-27', date: '2026-07-11', kind: 'same',
+    });
   });
 
   test('several credit notes, a PO still unlinked, and rows ROMS cannot fill', () => {

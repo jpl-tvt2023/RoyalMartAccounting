@@ -26,6 +26,6 @@ export function renderWithProviders(ui, { route = '/', user } = {}) {
 export const ADMIN = { id: 1, name: 'Keshav', username: 'admin', roles: ['Admin'], permissions: [] };
 export const ACCOUNTANT = {
   id: 3, name: 'Asha', username: 'asha', roles: ['Accountant'],
-  permissions: ['matching.view', 'matching.run', 'matching.review', 'matching.rules', 'matching.parties'],
+  permissions: ['matching.view', 'matching.run', 'matching.review', 'matching.rules', 'matching.parties', 'autofill.view', 'autofill.approve'],
 };
-export const VIEWER = { id: 4, name: 'Vik', username: 'vik', roles: ['Viewer'], permissions: ['matching.view'] };
+export const VIEWER = { id: 4, name: 'Vik', username: 'vik', roles: ['Viewer'], permissions: ['matching.view', 'autofill.view'] };

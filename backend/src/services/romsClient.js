@@ -1,12 +1,17 @@
-// RAMS reading ROMS: GET {ROMS_API_URL}/api/integration/refs/:resource, with
-// ROMS's INTEGRATION_TOKEN (ROMS middleware/serviceAuth.js). Read-only -- RAMS
-// writes nothing to ROMS until auto-fill (M6), which is switched on separately.
+// RAMS talking to ROMS's integration API with ROMS's INTEGRATION_TOKEN (ROMS
+// middleware/serviceAuth.js):
+//   GET  /api/integration/refs/:resource   what RAMS matches against
+//   POST /api/integration/autofill         auto-fill's writes -- compare-and-set
+//        on the value RAMS read, so repeating one that landed comes back
+//        "Already set" and a retry is safe
 //
 // ROMS_API_URL and ROMS_INTEGRATION_TOKEN are optional: without them matching
 // runs on the copy RAMS last read, and the pages say ROMS isn't connected.
 // The token is never logged or returned.
 const RESOURCES = ['vendors', 'products', 'vendor-codes', 'pos', 'lines', 'rtv'];
 const PAGE_SIZE = 1000;
+// ROMS's AUTOFILL_MAX_ITEMS (integration.controller.js) is 200.
+const AUTOFILL_MAX = 200;
 
 class RomsError extends Error {
   constructor(message, status = 0) {
@@ -29,12 +34,17 @@ function createRomsClient({
 } = romsSettings()) {
   const base = `${String(url || '').replace(/\/+$/, '')}/api/integration`;
 
-  async function get(path) {
+  async function request(path, body) {
     for (let attempt = 1; ; attempt++) {
       let res;
       try {
         res = await fetchImpl(base + path, {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'rams-backend' },
+          method: body ? 'POST' : 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'rams-backend',
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (e) {
@@ -58,11 +68,23 @@ function createRomsClient({
     if (!RESOURCES.includes(resource)) throw new Error(`Unknown ROMS reference ${resource}`);
     const rows = [];
     for (let page = 1; ; page++) {
-      const data = await get(`/refs/${resource}?page=${page}&page_size=${PAGE_SIZE}`);
+      const data = await request(`/refs/${resource}?page=${page}&page_size=${PAGE_SIZE}`);
       if (!Array.isArray(data.rows)) throw new RomsError(`ROMS sent no rows for ${resource}`);
       rows.push(...data.rows);
       if (!data.rows.length || rows.length >= Number(data.total)) return rows;
     }
+  }
+
+  // items: [{ target: 'bill' | 'rtv_cn', po_id, value, date, expected, note }],
+  // at most AUTOFILL_MAX per call. ROMS answers one result per item, in order.
+  async function autofill(items, { dryRun = false } = {}) {
+    if (!items.length) return { results: [] };
+    if (items.length > AUTOFILL_MAX) throw new Error(`At most ${AUTOFILL_MAX} items per ROMS auto-fill call`);
+    const data = await request('/autofill', { items, dry_run: Boolean(dryRun) });
+    if (!Array.isArray(data.results) || data.results.length !== items.length) {
+      throw new RomsError('ROMS did not answer for every auto-fill item');
+    }
+    return data;
   }
 
   return {
@@ -72,7 +94,10 @@ function createRomsClient({
       for (const r of RESOURCES) out[r] = await refs(r);
       return out;
     },
+    autofill,
   };
 }
 
-module.exports = { createRomsClient, romsSettings, RomsError, RESOURCES };
+module.exports = {
+  createRomsClient, romsSettings, RomsError, RESOURCES, AUTOFILL_MAX,
+};

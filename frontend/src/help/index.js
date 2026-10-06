@@ -6,6 +6,7 @@
 import { signingIn, dashboard } from './gettingStarted';
 import { users, auditLog, tallyCompanies, rolesPermissions } from './admin';
 import { matchReview, matchingRules, partyLedgers, generalFaq } from './matching';
+import { autoFill } from './autofill';
 
 export const HELP_SECTIONS = [
   signingIn,
@@ -13,6 +14,7 @@ export const HELP_SECTIONS = [
   matchReview,
   matchingRules,
   partyLedgers,
+  autoFill,
   tallyCompanies,
   rolesPermissions,
   users,

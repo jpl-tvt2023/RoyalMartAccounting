@@ -142,12 +142,13 @@ export const CHECK_TEXT = {
   date: { label: 'Date', ok: 'The invoice is dated on or after the PO.', failed: REASON_TEXT.po.check_date },
 };
 
-// What auto-fill (M6) would do to the ROMS field.
+// What auto-fill does to the ROMS field.
 export function fillText(fill) {
   if (!fill) return '';
   const field = fill.field === 'bill_no' ? 'Bill No' : 'CN No';
   if (fill.kind === 'same') return `${field} already ${fill.value}`;
   if (fill.kind === 'fill') return `${field}: blank → ${fill.value}`;
+  if (fill.kind === 'differs') return `${field}: ${fill.current} → ${fill.value} (only by a person)`;
   return `${field}: ${fill.current} → ${fill.value}`;
 }
 

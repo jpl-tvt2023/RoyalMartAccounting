@@ -1,9 +1,11 @@
-// One matching run: read ROMS again, load, match, store what changed. Also
-// the preview (the same match with draft rules, nothing written) and the rule
-// for when the Connector should ask for a run.
+// One matching run: read ROMS again, load, match, store what changed, and plan
+// what auto-fill writes (autofill.js). Also the preview (the same match with
+// draft rules, nothing written) and the rule for when the Connector should ask
+// for a run.
 const { matchAll, countOutcomes } = require('./engine');
 const { loadInputs, todayIst } = require('./load');
 const { writeResults } = require('./write');
+const { planAutofill } = require('./autofill');
 const { refreshRoms } = require('../services/romsRefs');
 const { loadSettings } = require('../services/matchSettings');
 const { loadSettings: loadSyncSettings } = require('../services/syncSettings');
@@ -20,9 +22,11 @@ async function runMatching(client, { trigger, userId = null, roms, romsSettings,
     args: [`-${STALE_MINUTES} minutes`],
   });
   // One run at a time: the insert only happens when none is running.
+  // sync_mark: the last sync run finished by now -- what this match covers.
   const { rows } = await client.execute({
-    sql: `INSERT INTO match_runs (trigger, user_id)
-          SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM match_runs WHERE status = 'running')
+    sql: `INSERT INTO match_runs (trigger, user_id, sync_mark)
+          SELECT ?, ?, (SELECT COALESCE(MAX(id), 0) FROM tally_sync_runs WHERE status <> 'running')
+           WHERE NOT EXISTS (SELECT 1 FROM match_runs WHERE status = 'running')
           RETURNING id`,
     args: [trigger, userId],
   });
@@ -34,7 +38,8 @@ async function runMatching(client, { trigger, userId = null, roms, romsSettings,
     const input = await loadInputs(client, { today });
     const out = matchAll(input);
     const written = await writeResults(client, out, runId);
-    const counts = { ...countOutcomes(out.results), ...written };
+    const autofill = await planAutofill(client);
+    const counts = { ...countOutcomes(out.results), ...written, autofill };
     await client.execute({
       sql: `UPDATE match_runs SET status = 'ok', roms_ok = ?, roms_error = ?, counts = ?, ms = ?, finished_at = datetime('now') WHERE id = ?`,
       args: [refresh.ok ? 1 : 0, refresh.ok ? null : refresh.error, JSON.stringify(counts), Date.now() - started, runId],
@@ -55,7 +60,8 @@ async function rematch(client, { today } = {}) {
   const input = await loadInputs(client, { today });
   const out = matchAll(input);
   const written = await writeResults(client, out, null);
-  return { ...countOutcomes(out.results), ...written };
+  const autofill = await planAutofill(client);
+  return { ...countOutcomes(out.results), ...written, autofill };
 }
 
 // What draft rules would change, against the stored results. Reads ROMS from
@@ -91,14 +97,17 @@ function officeNow(now = Date.now()) {
 // every run_every_minutes so ROMS edits get matched too.
 async function matchDue(client, now = Date.now()) {
   const { rows: [last] } = await client.execute(
-    "SELECT status, started_at, (julianday('now') - julianday(started_at)) * 1440 AS minutes FROM match_runs ORDER BY id DESC LIMIT 1",
+    "SELECT status, started_at, sync_mark, (julianday('now') - julianday(started_at)) * 1440 AS minutes FROM match_runs ORDER BY id DESC LIMIT 1",
   );
   if (!last) return { due: true, why: 'Matching has never run' };
   if (last.status === 'running' && Number(last.minutes) < STALE_MINUTES) return { due: false };
+  // Sync runs after the last match's mark (one the Connector ran after it
+  // started); a run from before marks existed is compared by time.
   const { rows: [changed] } = await client.execute({
-    sql: `SELECT COUNT(*) AS n FROM tally_sync_runs WHERE status = 'ok' AND finished_at > ?
+    sql: `SELECT COUNT(*) AS n FROM tally_sync_runs WHERE status = 'ok'
+            AND (CASE WHEN ? IS NULL THEN finished_at > ? ELSE id > ? END)
             AND (vouchers_upserted + vouchers_deleted + masters_upserted + masters_deleted) > 0`,
-    args: [last.started_at],
+    args: [last.sync_mark, last.started_at, last.sync_mark],
   });
   if (Number(changed.n) > 0) return { due: true, why: 'Tally changed since the last match' };
   const [settings, sync] = await Promise.all([loadSettings(client), loadSyncSettings(client)]);

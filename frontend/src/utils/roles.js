@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Settings, Users, ScrollText, Building2, Link2, ListChecks, SlidersHorizontal, BookUser, ShieldCheck, LifeBuoy,
+  LayoutDashboard, Settings, Users, ScrollText, Building2, Link2, ListChecks, SlidersHorizontal, BookUser, ShieldCheck, LifeBuoy, PenLine,
 } from 'lucide-react';
 
 // The RAMS role set. MIRRORED in backend/src/middleware/rbac.js and in
@@ -31,6 +31,10 @@ export const PERM = {
   MATCHING_REVIEW: 'matching.review',
   MATCHING_RULES: 'matching.rules',
   MATCHING_PARTIES: 'matching.parties',
+  AUTOFILL_VIEW: 'autofill.view',
+  AUTOFILL_APPROVE: 'autofill.approve',
+  AUTOFILL_OVERWRITE: 'autofill.overwrite',
+  AUTOFILL_SETTINGS: 'autofill.settings',
   SYNC_COMPANIES: 'sync.companies',
   SYNC_SCHEDULE: 'sync.schedule',
 };
@@ -74,6 +78,13 @@ export const NAV = [
         icon: BookUser,
         description: 'Which marketplace each Tally party ledger belongs to',
         permission: PERM.MATCHING_VIEW,
+      },
+      {
+        label: 'Auto-fill',
+        path: '/matching/autofill',
+        icon: PenLine,
+        description: 'Tally’s numbers written into ROMS, and what ROMS refused',
+        permission: PERM.AUTOFILL_VIEW,
       },
     ],
   },

@@ -2,7 +2,7 @@
 
 The RAMS API: Node 20, Express 5 (CommonJS), `@libsql/client` with raw SQL, the same stack and conventions as the ROMS backend, copied rather than shared.
 
-It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/settings/permissions`, `/api/sync/status`, `/api/matching/*` and `/api/health`. The Connector uses `/api/agent/*` (see below).
+It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/settings/permissions`, `/api/sync/status`, `/api/matching/*`, `/api/autofill/*` and `/api/health`. The Connector uses `/api/agent/*` (see below).
 
 ## Run it locally
 
@@ -39,7 +39,7 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - Every write is idempotent on (company, Tally GUID).
   - A voucher older than the stored copy (lower AlterID) is skipped.
   - Watermarks move only when a run finishes ok (`controllers/agent.controller.js`).
-- **The tables** (migrations 004–009; 010–012 are permissions and matching, below):
+- **The tables** (migrations 004–009; 010–013 are permissions, matching and auto-fill, below):
   - `tally_companies`, `agents`, `tally_sync_state`, `tally_sync_runs`
   - the masters (`tally_groups`, `tally_ledgers`, `tally_stock_items`, `tally_voucher_types`)
   - `tally_vouchers` with its ledger lines, bill allocations, inventory lines and Buyer's Order Nos
@@ -61,13 +61,13 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - `/api/auth/me` and login return the user's effective `permissions`, and the UI hides what they can't use.
 - **Users, the Audit Log and the permissions page stay `allowRoles(Admin, Owner)` and are never grantable**, so nobody can give themselves admin rights.
 - **Defaults:**
-  - Accountants: every `matching.*` permission
-  - Viewers: `matching.view`
-  - `sync.companies` and `sync.schedule`: Admin/Owner until granted
+  - Accountants: every `matching.*` permission, plus `autofill.view` and `autofill.approve`
+  - Viewers: `matching.view` and `autofill.view`
+  - `autofill.overwrite`, `autofill.settings`, `sync.companies` and `sync.schedule`: Admin/Owner until granted
 
 ## Matching (M5)
 
-RAMS links each ROMS PO to the Tally sales invoice that billed it, and each RTV row to the credit note that settled it. Nothing is written to ROMS yet (that is M6); each linked row only shows what auto-fill *would* write.
+RAMS links each ROMS PO to the Tally sales invoice that billed it, and each RTV row to the credit note that settled it. Each linked row carries a `fill`: what auto-fill writes into ROMS (below).
 
 - **Reading ROMS:**
   - `services/romsClient.js` pages `GET {ROMS_API_URL}/api/integration/refs/:resource` with ROMS's `INTEGRATION_TOKEN` (ROMS `feature/RAMS`, M1). It's read-only.
@@ -86,7 +86,7 @@ RAMS links each ROMS PO to the Tally sales invoice that billed it, and each RTV 
   4. match
   5. write what changed (`matching/write.js`): `match_results`, auto `doc_links`, and the party-ledger suggestions
 - **When it runs:**
-  - The heartbeat reply asks the Connector for a match (`commands: [{ type: 'match' }]`) when none has run, when Tally changed since the last one, or every `run_every_minutes` in office hours. The Connector then calls `POST /api/agent/match`.
+  - The heartbeat reply asks the Connector for a match (`commands: [{ type: 'match' }]`) when none has run, when a sync stored changes after the last match started (`match_runs.sync_mark`, migration 013), or every `run_every_minutes` in office hours. The Connector then calls `POST /api/agent/match`.
   - People press **Match now** (`POST /api/matching/run`).
   - A rule, vendor, party-ledger or decision change re-matches on the stored copy at once.
   - `npm run match` does one run from the command line, against whatever `.env` points at.
@@ -99,11 +99,48 @@ RAMS links each ROMS PO to the Tally sales invoice that billed it, and each RTV 
   - `party-ledgers` (+ `accept-suggestions`)
   - Each route takes the `matching.*` permission it needs (`routes/matching.routes.js`).
 
+## Auto-fill into ROMS (M6)
+
+RAMS writes Tally's number into the ROMS field it belongs in, in Tally's format exactly: a linked PO's **Bill No + Bill Date**, a linked RTV row's **CN No + CN Date**. Nothing else in ROMS is written.
+- **Through ROMS's own endpoint:** `POST {ROMS_API_URL}/api/integration/autofill` (ROMS M1, `romsClient.autofill`).
+  - Each write is compare-and-set on the value RAMS read (`expected`), so a person's edit since always wins.
+  - ROMS runs its own checks (Bill No format and uniqueness, RTV on the page, not DN - Disposed) and audits each write as "Tally Sync".
+  - A repeat of a write that landed comes back "Already set", so a retry is safe.
+- **What gets written** (`engine.js` `fillOf`, then `matching/autofill.js` `wanted`):
+
+  | `fill.kind` | ROMS holds | Written |
+  |---|---|---|
+  | `fill` | blank | yes |
+  | `replace` | a typed form of Tally's number (`607`, `0607`) | if `replace_typed` (default on) |
+  | `same` | Tally's number already | only the date, when it differs (`bill_date_rule`) |
+  | `differs` | anything else (only on a link a person settled) | never automatically; `POST /items/:kind/:id/overwrite` with `autofill.overwrite` |
+
+- **The switches are data** (migration 013, `autofill_settings`, `services/autofillSettings.js`, audited `AUTOFILL_SETTINGS_UPDATE`):
+  - `bill_mode` and `cn_mode`, each `off | preview | approve | auto`, **default off**
+    - preview: a ROMS dry run, nothing written
+    - approve (*Ask first*): a person approves, then RAMS writes
+    - auto: written after every match
+  - `replace_typed`, and `bill_date_rule` (`tally` or `keep`)
+- **How it runs:**
+  - `planAutofill` (after every match and re-match) turns `match_results.fill` into `autofill_items`, the open work.
+  - An unchanged plan keeps its state, so a refusal isn't sent every hour.
+  - `sendAutofill` sends it to ROMS by mode, 25 items per call, writes before dry runs, and stops starting batches after about 30 s; it answers `more`. One round at a time (`autofill_runs`).
+  - Applied or already-set items update RAMS's copy of ROMS and the match result at once.
+  - Every real answer goes to `autofill_events` (the *Written* log).
+- **When it runs:**
+  - The heartbeat reply adds `{ type: 'autofill' }` when work is due, and `POST /api/agent/match` answers `autofill_due`. The Connector then calls `POST /api/agent/autofill` while `more`.
+  - People press **Write now** (`POST /api/autofill/run`, looped by the page).
+  - **To stop it, set the field to Off.** Removing ROMS's `INTEGRATION_TOKEN` stops everything.
+- **The API (`/api/autofill`):**
+  - `summary`, `items`, `events`, `settings` (GET/PUT)
+  - `approve`, `run`, `items/:kind/:id/retry`, `items/:kind/:id/overwrite`
+  - Permissions: `autofill.view` / `approve` / `overwrite` / `settings` (`routes/autofill.routes.js`).
+
 ## On Vercel
 
 RAMS is **one Vercel project** using [Services](https://vercel.com/docs/services) (Beta), configured in the root `vercel.json`. This API is the `backend` service, served on `/api/*`, and the web app is the `frontend` service on everything else, all on one domain. The API runs on Vercel's zero-config Express support, using `app.js`, which exports the app. `server.js` is for local runs only.
 
-The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `NODE_ENV=production`, plus `RAMS_SYNC_FROM` if the default sync start isn't wanted, and `ROMS_API_URL` / `ROMS_INTEGRATION_TOKEN` for matching. Changing a variable only takes effect after a redeploy. **Vercel doesn't run migrations:** run `npm run migrate` against the database first, after checking `.env`.
+The project's environment variables are `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `NODE_ENV=production`, plus `RAMS_SYNC_FROM` if the default sync start isn't wanted, and `ROMS_API_URL` / `ROMS_INTEGRATION_TOKEN` for matching and auto-fill. Changing a variable only takes effect after a redeploy. **Vercel doesn't run migrations:** run `npm run migrate` against the database first, after checking `.env`.
 
 `FRONTEND_URL` is optional. The API always accepts requests from its own domain, which covers production, previews and per-deployment URLs. List other origins in `FRONTEND_URL` (comma-separated) only when they need to call it, for example `http://localhost:5174` in development. Any other origin gets a 403.
 

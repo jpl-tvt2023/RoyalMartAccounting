@@ -50,6 +50,7 @@ export const dashboard = {
         'Linked: POs whose Tally invoice RAMS found.',
         'Needs review: POs a person has to decide. Click it to open them in Match review.',
         'Waiting for Tally: nothing in Tally yet, which is normal until the accountant enters the invoice.',
+        'The Auto-fill line (if you may see auto-fill) says each field’s mode and what RAMS wrote into ROMS today. Click it to open Matching → Auto-fill.',
       ],
     },
   ],

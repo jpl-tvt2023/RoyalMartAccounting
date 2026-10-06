@@ -10,6 +10,10 @@ vi.mock('../../../api/matching.api', () => ({
   getMatchingSummary: vi.fn(), listResults: vi.fn(), getResult: vi.fn(), decide: vi.fn(), searchVouchers: vi.fn(), runMatching: vi.fn(),
 }));
 vi.mock('../../../api/audit.api', () => ({ getEntityHistory: vi.fn().mockResolvedValue([]) }));
+vi.mock('../../../api/autofill.api', () => ({
+  getAutofillSummary: vi.fn().mockResolvedValue({ fields: { po: { mode: 'approve' }, rtv: { mode: 'off' } } }),
+  overwriteAutofill: vi.fn(),
+}));
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }));
 
 const SUMMARY = {
@@ -34,6 +38,7 @@ const B002 = {
   ...S292, id: 'B002', po_id: 'B002', outcome: 'linked', reason: null, vendor: 'Blinkit', company_id: 1, company: 'MH',
   voucher_guid: 'g-607', voucher_number: '607/RM/26-27', voucher_date: '2026-07-01', params: {}, notes: ['date'],
   fill: { field: 'bill_no', current: '607', value: '607/RM/26-27', kind: 'replace' },
+  autofill: { state: 'checked', write_kind: 'replace', reason: null, dry: true, written_at: null },
   po: { vendor_po_id: 'P4588464', bill_no: '607', po_date: '2026-06-28' },
 };
 const DETAIL = {
@@ -69,6 +74,7 @@ describe('Match review', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /687 Linked/ }));
     expect(await screen.findByText('Bill No: 607 → 607/RM/26-27')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for approval')).toBeInTheDocument();
     expect(screen.getByText('Note: Date')).toBeInTheDocument();
     expect(api.listResults).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'linked' }));
   });

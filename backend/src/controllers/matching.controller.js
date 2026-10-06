@@ -94,11 +94,15 @@ const RESULT_SELECT = `
   SELECT r.target_kind, r.target_id, r.po_id, r.outcome, r.reason, r.method, r.vendor, r.company_id, c.code AS company,
          r.voucher_guid, r.voucher_number, r.voucher_date, r.detail, r.fill, r.outcome_since, r.updated_at,
          p.vendor_po_id, p.bill_no, p.bill_date, p.po_date, p.status AS po_status, p.party_name, p.city,
-         t.rtv_no, t.cn_number, t.cn_date, t.status AS rtv_status
+         t.rtv_no, t.cn_number, t.cn_date, t.status AS rtv_status,
+         ai.state AS af_state, ai.reason AS af_reason, ai.dry AS af_dry, ai.kind AS af_kind,
+         (SELECT e.at FROM autofill_events e WHERE e.target_kind = r.target_kind AND e.target_id = r.target_id
+             AND e.result = 'applied' ORDER BY e.id DESC LIMIT 1) AS af_written_at
     FROM match_results r
     LEFT JOIN tally_companies c ON c.id = r.company_id
     LEFT JOIN roms_pos p ON p.po_id = r.po_id
-    LEFT JOIN roms_rtv t ON r.target_kind = 'rtv' AND t.id = CAST(r.target_id AS INTEGER)`;
+    LEFT JOIN roms_rtv t ON r.target_kind = 'rtv' AND t.id = CAST(r.target_id AS INTEGER)
+    LEFT JOIN autofill_items ai ON ai.target_kind = r.target_kind AND ai.target_id = r.target_id`;
 
 function shapeResult(r, { full = false } = {}) {
   const detail = parse(r.detail, {});
@@ -116,6 +120,15 @@ function shapeResult(r, { full = false } = {}) {
     voucher_number: r.voucher_number,
     voucher_date: r.voucher_date,
     fill: parse(r.fill, null),
+    // Where auto-fill is with this row: the open item's state, or when RAMS
+    // last wrote it into ROMS.
+    autofill: r.af_state || r.af_written_at ? {
+      state: r.af_state || null,
+      write_kind: r.af_kind || null,
+      reason: r.af_reason || null,
+      dry: Boolean(Number(r.af_dry || 0)),
+      written_at: r.af_written_at || null,
+    } : null,
     params: detail.params || {},
     notes: detail.notes || [],
     person: detail.person || null,

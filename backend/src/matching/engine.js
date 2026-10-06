@@ -12,7 +12,7 @@
 //   review       a person decides (reason says why)
 //   waiting      nothing in Tally yet -- normal for a PO not invoiced yet
 //   not_matched  out of scope (vendor setting, RTV row ROMS can't fill)
-// and, when linked, what auto-fill (M6) would write.
+// and, when linked, what auto-fill writes into ROMS (matching/autofill.js).
 const {
   DocIndex, exactKey, normKey, compactKey, splitRefs, serialOf, withoutLabel, howTyped,
 } = require('./docno');
@@ -224,10 +224,24 @@ function matchAll(input) {
     return { chosen: null, by: 'ambiguous' };
   }
 
-  const fillOf = (field, current, v) => {
+  // A typed CN No that is a way of writing a credit note's number (no serial
+  // forms: Tally's CN numbers are plain).
+  const fitsCn = (typed, number) => {
+    const level = TYPED_STRENGTH[howTyped(typed, number)];
+    return Boolean(level) && level !== 'serial' && within(level);
+  };
+
+  // What auto-fill would write for a link: the voucher's number and date into
+  // the ROMS field. kind says how that relates to what ROMS holds now:
+  //   fill     the field is blank
+  //   replace  a typed form of Tally's number (607 or 0607 for 607/RM/26-27)
+  //   differs  something else -- only on a link a person settled, and never
+  //            written without a person
+  //   same     already Tally's number (the date may still differ)
+  const fillOf = (field, current, currentDate, v, isForm) => {
     const cur = text(current);
-    const kind = !cur ? 'fill' : cur === v.number ? 'same' : 'replace';
-    return { field, current: cur, value: v.number, date: v.date, kind };
+    const kind = !cur ? 'fill' : cur === v.number ? 'same' : isForm(cur, v.number) ? 'replace' : 'differs';
+    return { field, current: cur, current_date: text(currentDate), value: v.number, date: v.date, kind };
   };
 
   // The checks on a linked invoice. Each returns null (passes or can't tell)
@@ -270,7 +284,7 @@ function matchAll(input) {
       outcome: 'linked', reason: null, method,
       company_id: chosen[0].company_id, voucher_guid: chosen[0].guid, voucher_number: chosen[0].number, voucher_date: chosen[0].date,
       detail: { how: extra.how || [], checks: [], notes: [], candidates: extra.candidates || chosen.map((v) => candidate(v, [method])), person: extra.person || null },
-      fill: chosen.length === 1 ? fillOf('bill_no', p.bill_no, chosen[0]) : null,
+      fill: chosen.length === 1 ? fillOf('bill_no', p.bill_no, p.bill_date, chosen[0], fits) : null,
       chosen,
       byPerson: Boolean(extra.person),
       orderCands: extra.orderCands || [],
@@ -478,7 +492,7 @@ function matchAll(input) {
       const link = (n, method, extra = {}) => {
         Object.assign(r, {
           outcome: 'linked', method, company_id: n.company_id, voucher_guid: n.guid, voucher_number: n.number, voucher_date: n.date,
-          fill: fillOf('cn_number', row.cn_number, n),
+          fill: fillOf('cn_number', row.cn_number, row.cn_date, n, fitsCn),
         });
         Object.assign(r.detail, extra);
         used.add(n.key);
@@ -520,7 +534,7 @@ function matchAll(input) {
     }
     // Rows with no CN No typed share what is left of the credit notes against
     // the invoice: one row and one note pair up, anything else is a person's.
-    for (const { r, free } of pending) {
+    for (const { row, r, free } of pending) {
       const left = free.filter((n) => !used.has(n.key));
       r.detail.candidates = left.map((n) => candidate(n, ['agst_ref']));
       if (!invoices.length) {
@@ -528,7 +542,7 @@ function matchAll(input) {
       } else if (!left.length) {
         Object.assign(r, { outcome: 'waiting', reason: 'no_cn_yet', detail: { ...r.detail, params: { ...r.detail.params, invoice: invoices[0].number } } });
       } else if (left.length === 1 && pending.length === 1) {
-        Object.assign(r, { outcome: 'linked', method: 'agst_ref', company_id: left[0].company_id, voucher_guid: left[0].guid, voucher_number: left[0].number, voucher_date: left[0].date, fill: fillOf('cn_number', null, left[0]) });
+        Object.assign(r, { outcome: 'linked', method: 'agst_ref', company_id: left[0].company_id, voucher_guid: left[0].guid, voucher_number: left[0].number, voucher_date: left[0].date, fill: fillOf('cn_number', row.cn_number, row.cn_date, left[0], fitsCn) });
         r.detail.how = [{ code: 'agst_ref', params: { invoice: invoices[0].number } }];
         links.push({ target_kind: 'rtv', target_id: r.target_id, role: 'credit_note', company_id: left[0].company_id, voucher_guid: left[0].guid, method: 'agst_ref' });
       } else {

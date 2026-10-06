@@ -4,6 +4,7 @@ const { logAction } = require('../services/auditLog.service');
 const { codeForState, syncShape } = require('../services/tallyCompany');
 const { loadSettings, scheduleOf } = require('../services/syncSettings');
 const { runMatching, matchDue, lastMatch } = require('../matching/run');
+const { sendAutofill, autofillDue, lastAutofill } = require('../matching/autofill');
 
 // The Connector API (/api/agent/*, Connector token only -- routes/agent.routes.js).
 // One sync of one company is a run:
@@ -15,6 +16,8 @@ const { runMatching, matchDue, lastMatch } = require('../matching/run');
 //   POST /runs/:id/reconcile        a period's full GUID list from Tally
 //   POST /runs/:id/finish           {ok, errors, backfillDone}
 //   POST /match                     the matching run a heartbeat asked for
+//   POST /autofill                  one round of auto-fill into ROMS, asked
+//                                   again while `more`
 //
 // Every write is idempotent on (company, Tally GUID), so the Connector may
 // resend anything. The watermarks move only in finish, on ok, to the counters
@@ -133,7 +136,7 @@ async function heartbeat(req, res, next) {
       throw err;
     }
 
-    const [{ rows }, settings, match, lastRun] = await Promise.all([
+    const [{ rows }, settings, match, lastRun, fill, lastFill] = await Promise.all([
       db.execute(
         `SELECT c.id, c.guid, c.name, c.code, s.*
            FROM tally_companies c LEFT JOIN tally_sync_state s ON s.company_id = c.id
@@ -143,14 +146,20 @@ async function heartbeat(req, res, next) {
       loadSettings(db),
       matchDue(db),
       lastMatch(db),
+      autofillDue(db),
+      lastAutofill(db),
     ]);
     res.json({
       companies: rows.map((r) => ({ id: Number(r.id), guid: r.guid, name: r.name, code: r.code, sync: syncShape(r) })),
       settings: { syncFrom: SYNC_FROM, schedule: scheduleOf(settings) },
       // RAMS has no clock of its own on Vercel: the Connector's minute
-      // heartbeat is asked to start a match when one is due.
-      commands: match.due ? [{ type: 'match', why: match.why }] : [],
+      // heartbeat is asked to start a match, or auto-fill, when one is due.
+      commands: [
+        ...(match.due ? [{ type: 'match', why: match.why }] : []),
+        ...(fill.due ? [{ type: 'autofill', why: fill.why }] : []),
+      ],
       matching: lastRun,
+      autofill: lastFill,
     });
   } catch (err) { sendError(res, next, err); }
 }
@@ -605,11 +614,25 @@ async function finish(req, res, next) {
 
 // POST /api/agent/match -- the Connector starting the matching run the
 // heartbeat asked for: read ROMS again, match, store what changed.
+// autofill_due says whether auto-fill has work now.
 async function match(req, res, next) {
   try {
     const out = await runMatching(db, { trigger: 'connector' });
-    res.json(out);
+    const due = await autofillDue(db);
+    res.json({ ...out, autofill_due: Boolean(due.due) });
   } catch (err) { sendError(res, next, err); }
 }
 
-module.exports = { heartbeat, startRun, masters, vouchers, reconcile, finish, match, MAX_VOUCHERS };
+// ------------------------------------------------------------------ autofill
+
+// POST /api/agent/autofill -- one time-boxed round of writing into ROMS, by
+// each field's mode. The Connector asks again while `more`.
+async function autofill(req, res, next) {
+  try {
+    res.json(await sendAutofill(db, { trigger: 'connector' }));
+  } catch (err) { sendError(res, next, err); }
+}
+
+module.exports = {
+  heartbeat, startRun, masters, vouchers, reconcile, finish, match, autofill, MAX_VOUCHERS,
+};

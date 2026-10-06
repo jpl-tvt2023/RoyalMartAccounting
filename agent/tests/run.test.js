@@ -122,7 +122,7 @@ describeIf('rams-connector run', () => {
     Object.assign(process.env, { ROMS_API_URL: roms.url, ROMS_INTEGRATION_TOKEN: roms.token });
     try {
       // The last match was before the syncs above.
-      await rams.db.execute("UPDATE match_runs SET started_at = datetime('now', '-1 day')");
+      await rams.db.execute("UPDATE match_runs SET started_at = datetime('now', '-1 day'), sync_mark = 0");
       clock = new Date(clock.getTime() + 60000);
       await service.cycle();
       expect(roms.calls.some((c) => c.startsWith('/api/integration/refs/pos'))).toBe(true);
@@ -136,6 +136,22 @@ describeIf('rams-connector run', () => {
       const next = await service.heartbeat();
       expect(next.commands.filter((c) => c.why === 'Tally changed since the last match')).toEqual([]);
       expect(next.matching).toMatchObject({ status: 'ok', po: { linked: 1, waiting: 1 } });
+      expect(next.autofill).toMatchObject({ billMode: 'off', cnMode: 'off', last: null });
+
+      // An Admin switches Bill No auto-fill to Automatic: the next heartbeat
+      // asks for it, and the Connector starts it -- RAMS writes Tally's
+      // number into ROMS.
+      await rams.db.execute("UPDATE autofill_settings SET bill_mode = 'auto' WHERE id = 1");
+      clock = new Date(clock.getTime() + 60000);
+      await service.cycle();
+      expect(roms.state.data.pos.find((p) => p.po_id === 'Z1')).toMatchObject({ bill_no: 'RM/26-27/001' });
+      expect(roms.autofills).toHaveLength(1);
+      expect(await rams.one("SELECT result, new_value FROM autofill_events WHERE po_id = 'Z1'"))
+        .toMatchObject({ result: 'applied', new_value: 'RM/26-27/001' });
+      const after = await service.heartbeat();
+      expect(after.commands.filter((c) => c.type === 'autofill')).toEqual([]);
+      expect(after.autofill).toMatchObject({ billMode: 'auto', last: { status: 'ok', counts: { written: 1 } } });
+      await rams.db.execute("UPDATE autofill_settings SET bill_mode = 'off' WHERE id = 1");
     } finally {
       delete process.env.ROMS_API_URL;
       delete process.env.ROMS_INTEGRATION_TOKEN;
