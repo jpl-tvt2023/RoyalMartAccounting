@@ -9,7 +9,8 @@ const { sendAutofill, autofillDue, lastAutofill } = require('../matching/autofil
 // The Connector API (/api/agent/*, Connector token only -- routes/agent.routes.js).
 // One sync of one company is a run:
 //
-//   POST /heartbeat                 every minute: status in, enabled companies out
+//   POST /heartbeat                 every minute: status in, enabled companies
+//                                   and commands (sync now, match, auto-fill) out
 //   POST /runs                      start {company_id, kind, altVchId, altMstId}
 //   POST /runs/:id/masters          complete master lists
 //   POST /runs/:id/vouchers         up to 250 vouchers
@@ -136,7 +137,7 @@ async function heartbeat(req, res, next) {
       throw err;
     }
 
-    const [{ rows }, settings, match, lastRun, fill, lastFill] = await Promise.all([
+    const [{ rows }, settings, match, lastRun, fill, lastFill, { rows: asked }] = await Promise.all([
       db.execute(
         `SELECT c.id, c.guid, c.name, c.code, s.*
            FROM tally_companies c LEFT JOIN tally_sync_state s ON s.company_id = c.id
@@ -148,6 +149,9 @@ async function heartbeat(req, res, next) {
       lastMatch(db),
       autofillDue(db),
       lastAutofill(db),
+      // "Sync now" requests not answered yet (an hour old at most).
+      db.execute(`SELECT r.id, r.company_id FROM sync_requests r JOIN tally_companies c ON c.id = r.company_id
+                   WHERE r.done_at IS NULL AND c.sync_enabled = 1 AND r.requested_at > datetime('now', '-60 minutes')`),
     ]);
     res.json({
       companies: rows.map((r) => ({ id: Number(r.id), guid: r.guid, name: r.name, code: r.code, sync: syncShape(r) })),
@@ -155,6 +159,7 @@ async function heartbeat(req, res, next) {
       // RAMS has no clock of its own on Vercel: the Connector's minute
       // heartbeat is asked to start a match, or auto-fill, when one is due.
       commands: [
+        ...asked.map((r) => ({ type: 'sync', company_id: Number(r.company_id), kind: 'light', why: 'Sync now, asked in RAMS' })),
         ...(match.due ? [{ type: 'match', why: match.why }] : []),
         ...(fill.due ? [{ type: 'autofill', why: fill.why }] : []),
       ],
@@ -224,6 +229,11 @@ async function startRun(req, res, next) {
         args: [companyId, req.agent.id, kind, altVchId, altMstId],
       });
       runId = Number(rows[0].id);
+      // A "Sync now" waiting for this company is answered by this run.
+      await tx.execute({
+        sql: "UPDATE sync_requests SET done_at = datetime('now'), run_id = ? WHERE company_id = ? AND done_at IS NULL",
+        args: [runId, companyId],
+      });
       state = await stateOf(tx, companyId);
       await tx.commit();
     } catch (err) {

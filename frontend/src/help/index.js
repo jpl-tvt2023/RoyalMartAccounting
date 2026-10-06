@@ -7,6 +7,9 @@ import { signingIn, dashboard } from './gettingStarted';
 import { users, auditLog, tallyCompanies, rolesPermissions } from './admin';
 import { matchReview, matchingRules, partyLedgers, generalFaq } from './matching';
 import { autoFill } from './autofill';
+import {
+  invoicesHelp, notesHelp, transfersHelp, receivablesHelp, exceptionsHelp, syncHealthHelp,
+} from './reports';
 
 export const HELP_SECTIONS = [
   signingIn,
@@ -15,6 +18,12 @@ export const HELP_SECTIONS = [
   matchingRules,
   partyLedgers,
   autoFill,
+  invoicesHelp,
+  notesHelp,
+  transfersHelp,
+  receivablesHelp,
+  exceptionsHelp,
+  syncHealthHelp,
   tallyCompanies,
   rolesPermissions,
   users,

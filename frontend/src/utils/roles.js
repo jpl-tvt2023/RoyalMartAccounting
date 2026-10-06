@@ -1,5 +1,6 @@
 import {
   LayoutDashboard, Settings, Users, ScrollText, Building2, Link2, ListChecks, SlidersHorizontal, BookUser, ShieldCheck, LifeBuoy, PenLine,
+  FileText, Receipt, ArrowLeftRight, Wallet, AlertTriangle, Activity, BarChart3,
 } from 'lucide-react';
 
 // The RAMS role set. MIRRORED in backend/src/middleware/rbac.js and in
@@ -35,8 +36,11 @@ export const PERM = {
   AUTOFILL_APPROVE: 'autofill.approve',
   AUTOFILL_OVERWRITE: 'autofill.overwrite',
   AUTOFILL_SETTINGS: 'autofill.settings',
+  REPORTS_VIEW: 'reports.view',
+  REPORTS_SETTINGS: 'reports.settings',
   SYNC_COMPANIES: 'sync.companies',
   SYNC_SCHEDULE: 'sync.schedule',
+  SYNC_RUN: 'sync.run',
 };
 
 /**
@@ -85,6 +89,30 @@ export const NAV = [
         icon: PenLine,
         description: 'Tally’s numbers written into ROMS, and what ROMS refused',
         permission: PERM.AUTOFILL_VIEW,
+      },
+    ],
+  },
+  {
+    label: 'Reports',
+    icon: BarChart3,
+    children: [
+      {
+        label: 'Invoices', path: '/reports/invoices', icon: FileText, description: 'Every Tally sales invoice, what settled it and what is owed', permission: PERM.REPORTS_VIEW,
+      },
+      {
+        label: 'Credit & debit notes', path: '/reports/notes', icon: Receipt, description: 'Each note, the invoice it settles, its PO and RTV row', permission: PERM.REPORTS_VIEW,
+      },
+      {
+        label: 'Stock transfers', path: '/reports/transfers', icon: ArrowLeftRight, description: 'Sales between our own registrations', permission: PERM.REPORTS_VIEW,
+      },
+      {
+        label: 'Receivables', path: '/reports/receivables', icon: Wallet, description: 'What each marketplace owes, how old, and credit terms', permission: PERM.REPORTS_VIEW,
+      },
+      {
+        label: 'Exceptions', path: '/reports/exceptions', icon: AlertTriangle, description: 'Everything that needs a person, and where to fix it', permission: PERM.REPORTS_VIEW,
+      },
+      {
+        label: 'Sync health', path: '/sync', icon: Activity, description: 'The Connector, Tally, each company and every sync run', roles: ALL_ROLES,
       },
     ],
   },

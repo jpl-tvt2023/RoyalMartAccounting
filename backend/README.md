@@ -2,7 +2,7 @@
 
 The RAMS API: Node 20, Express 5 (CommonJS), `@libsql/client` with raw SQL, the same stack and conventions as the ROMS backend, copied rather than shared.
 
-It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/settings/permissions`, `/api/sync/status`, `/api/matching/*`, `/api/autofill/*` and `/api/health`. The Connector uses `/api/agent/*` (see below).
+It serves people at `/api/auth`, `/api/users`, `/api/audit-logs`, `/api/companies`, `/api/settings/sync`, `/api/settings/permissions`, `/api/sync/status|runs|now`, `/api/matching/*`, `/api/autofill/*`, `/api/reports/*` and `/api/health`. The Connector uses `/api/agent/*` (see below).
 
 ## Run it locally
 
@@ -39,7 +39,7 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - Every write is idempotent on (company, Tally GUID).
   - A voucher older than the stored copy (lower AlterID) is skipped.
   - Watermarks move only when a run finishes ok (`controllers/agent.controller.js`).
-- **The tables** (migrations 004–009; 010–013 are permissions, matching and auto-fill, below):
+- **The tables** (migrations 004–009; 010–014 are permissions, matching, auto-fill and reports, below):
   - `tally_companies`, `agents`, `tally_sync_state`, `tally_sync_runs`
   - the masters (`tally_groups`, `tally_ledgers`, `tally_stock_items`, `tally_voucher_types`)
   - `tally_vouchers` with its ledger lines, bill allocations, inventory lines and Buyer's Order Nos
@@ -61,8 +61,8 @@ The RAMS Connector (`../agent`) reads Tally on the office PC and pushes it here.
   - `/api/auth/me` and login return the user's effective `permissions`, and the UI hides what they can't use.
 - **Users, the Audit Log and the permissions page stay `allowRoles(Admin, Owner)` and are never grantable**, so nobody can give themselves admin rights.
 - **Defaults:**
-  - Accountants: every `matching.*` permission, plus `autofill.view` and `autofill.approve`
-  - Viewers: `matching.view` and `autofill.view`
+  - Accountants: every `matching.*` permission, `autofill.view`, `autofill.approve`, `reports.view`, `reports.settings` and `sync.run`
+  - Viewers: `matching.view`, `autofill.view` and `reports.view`
   - `autofill.overwrite`, `autofill.settings`, `sync.companies` and `sync.schedule`: Admin/Owner until granted
 
 ## Matching (M5)
@@ -135,6 +135,37 @@ RAMS writes Tally's number into the ROMS field it belongs in, in Tally's format 
   - `summary`, `items`, `events`, `settings` (GET/PUT)
   - `approve`, `run`, `items/:kind/:id/retry`, `items/:kind/:id/overwrite`
   - Permissions: `autofill.view` / `approve` / `overwrite` / `settings` (`routes/autofill.routes.js`).
+
+## Reports (M7)
+
+Invoices, Credit & debit notes, Stock transfers, Receivables, Exceptions and Sync health. **Every figure is worked out at read time** from the Tally copy (`src/books/book.js`); nothing derivable is stored.
+- **The invoice book:**
+  - Each live Sales voucher since `RAMS_SYNC_FROM` (in companies with sync on) opens a bill on its party ledger: the New Ref, a debit, so negative.
+  - Receipts, credit notes and journals settle it with Agst Ref allocations of the same name, on the same ledger, in the same company.
+  - `outstanding = -(sum of the bill's allocations)`. Each settlement is classed by the settling voucher: Receipt → received, Credit Note → credit notes, Journal with a TDS ledger → TDS, anything else → adjustments.
+  - Taxable value and GST come from the ledger lines' group chain (*Sales Accounts*, *Duties & Taxes*).
+  - **Marketplace:** the linked PO's vendor, else the party-ledger mapping, else its suggestion.
+  - A sale to an `internal` ledger is a **stock transfer**, kept out of receivables.
+  - On Account money on a debtor ledger is shown apart as *received on account*, and *net outstanding* takes it off.
+- **Overdue and ageing:**
+  - Overdue = still owed after the vendor's credit days (`vendor_terms`, else `report_settings.default_credit_days`), counted from the invoice date.
+  - Ageing buckets are by invoice age: 0–30 / 31–60 / 61–90 / 90+.
+- **Exceptions:**
+  - a ROMS number not in Tally
+  - a Tally invoice with no PO after `exception_days` (vendors set to transfer/skip are left out)
+  - ROMS ≠ Tally
+  - ambiguous
+  - an RTV row with no CN after `exception_days` from the GRN date
+  - auto-fill refused
+- **Config** (migration 014, audited): `report_settings`, `vendor_terms` (seeded Scootsy 5, Now 45, Minutes 15).
+- **Sync now** (`sync.run`):
+  - `POST /api/sync/now` adds a `sync_requests` row.
+  - The heartbeat sends `{ type: 'sync', company_id }`, and the Connector runs a light sync that cycle.
+  - The next `POST /api/agent/runs` for that company marks the request done.
+  - Requests expire after 60 minutes.
+- **The API:**
+  - `/api/reports`: `invoices`, `notes`, `transfers`, `receivables`, `exceptions`, `settings` (GET/PUT), `terms/:vendor` (PUT). `page_size` goes up to 10,000 for CSV downloads.
+  - `/api/sync/runs`
 
 ## On Vercel
 
