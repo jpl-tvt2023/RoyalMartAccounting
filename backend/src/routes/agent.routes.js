@@ -12,5 +12,6 @@ router.post('/runs/:id/vouchers', c.vouchers);
 router.post('/runs/:id/reconcile', c.reconcile);
 router.post('/runs/:id/finish', c.finish);
 router.post('/match', c.match);
+router.post('/autofill', c.autofill);
 
 module.exports = router;

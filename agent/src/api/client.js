@@ -71,6 +71,17 @@ function createApiClient({
         throw e;
       }
     },
+    // One round of auto-fill: RAMS writes Tally's numbers into ROMS, as each
+    // field's mode says, and answers `more` while work is left. A round
+    // already running there is fine: it is the same work.
+    async autofill() {
+      try {
+        return await post('/autofill', {});
+      } catch (e) {
+        if (e.status === 409) return { skipped: true, message: e.message };
+        throw e;
+      }
+    },
     async finish(runId, body) {
       try {
         return await post(`/runs/${runId}/finish`, body);

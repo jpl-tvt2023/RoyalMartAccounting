@@ -7,6 +7,8 @@ import Badge from '../ui/Badge';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { HistoryButton } from '../shared/HistoryDrawer';
 import { getResult, decide, searchVouchers } from '../../api/matching.api';
+import { overwriteAutofill } from '../../api/autofill.api';
+import { autofillStatus } from '../../utils/autofillText';
 import {
   OUTCOMES, reasonText, howText, METHOD_TEXT, CHECK_TEXT, fillText,
 } from '../../utils/matchReasons';
@@ -20,8 +22,13 @@ export function OutcomeBadge({ outcome }) {
 }
 
 // One PO or RTV row: how RAMS matched it, the checks, every candidate, and
-// the decisions a person can take (with "matching.review").
-export default function MatchDetail({ target, onClose, onChanged, canReview }) {
+// the decisions a person can take (with "matching.review"). With "See
+// auto-fill", where auto-fill is with the row (fillMode is its field's mode);
+// with "Replace a different value", writing Tally's number over one staff
+// typed.
+export default function MatchDetail({
+  target, onClose, onChanged, canReview, fillMode, canOverwrite = false,
+}) {
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(null); // { action, voucher?, title, message, label, variant }
   const [busy, setBusy] = useState(false);
@@ -48,10 +55,16 @@ export default function MatchDetail({ target, onClose, onChanged, canReview }) {
   const act = async () => {
     setBusy(true);
     try {
-      const body = confirm.voucher ? { company_id: confirm.voucher.company_id, voucher_guid: confirm.voucher.guid } : {};
-      const fresh = await decide(target.kind, target.id, confirm.action, body);
-      setDetail((d) => ({ ...d, ...fresh }));
-      toast.success(confirm.done);
+      if (confirm.action === 'overwrite') {
+        const out = await overwriteAutofill(target.kind, target.id);
+        if (out.result === 'written' || out.result === 'already') toast.success(confirm.done);
+        else toast.error(`ROMS refused: ${out.reason || 'no reason given'}`);
+      } else {
+        const body = confirm.voucher ? { company_id: confirm.voucher.company_id, voucher_guid: confirm.voucher.guid } : {};
+        const fresh = await decide(target.kind, target.id, confirm.action, body);
+        setDetail((d) => ({ ...d, ...fresh }));
+        toast.success(confirm.done);
+      }
       setConfirm(null);
       onChanged?.();
       getResult(target.kind, target.id).then(setDetail).catch(() => {});
@@ -71,6 +84,7 @@ export default function MatchDetail({ target, onClose, onChanged, canReview }) {
     label: `Use this ${noun}`, variant: 'primary', done: `Linked to ${v.number}`,
   });
   const decisions = detail?.decisions || [];
+  const fillStatus = detail && fillMode !== undefined && detail.outcome === 'linked' ? autofillStatus(detail, fillMode) : null;
   const current = detail?.voucher_guid ? (detail.candidates || []).find((c) => c.guid === detail.voucher_guid && c.company_id === detail.company_id) : null;
 
   return (
@@ -106,7 +120,24 @@ export default function MatchDetail({ target, onClose, onChanged, canReview }) {
             <div>
               <h3 className="font-semibold text-gray-900">Tally {noun}</h3>
               <p className="text-gray-700 mt-1">{detail.company} · <span className="font-medium">{detail.voucher_number}</span> · {formatDay(detail.voucher_date)}</p>
-              {detail.fill && <p className="text-gray-500 mt-1">Auto-fill would write: <span className="font-medium text-gray-800">{fillText(detail.fill)}</span></p>}
+              {detail.fill && (
+                <p className="text-gray-500 mt-1">
+                  Auto-fill: <span className="font-medium text-gray-800">{fillText(detail.fill)}</span>
+                  {fillStatus && <span className={`ml-2 ${fillStatus.tone}`}>{fillStatus.text}</span>}
+                </p>
+              )}
+              {detail.autofill?.state === 'differs' && canOverwrite && (
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => setConfirm({
+                  action: 'overwrite',
+                  title: 'Write Tally’s number',
+                  message: `ROMS has "${detail.fill.current}", which isn't a way of writing ${detail.fill.value}. Write ${detail.fill.value} into ROMS over it? ROMS's history will show it, with your name.`,
+                  label: 'Write it',
+                  variant: 'primary',
+                  done: `Written into ROMS: ${detail.fill.value}`,
+                })}>
+                  Write Tally’s number into ROMS
+                </Button>
+              )}
             </div>
           )}
 

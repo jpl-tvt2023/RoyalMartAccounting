@@ -9,8 +9,8 @@ const { CATALOG, KEYS } = require('../src/services/permissions');
 const get = (token) => bearer(request(app).get('/api/settings/permissions'), token);
 const put = (token, roles) => bearer(request(app).put('/api/settings/permissions'), token).send({ roles });
 const DEFAULTS = {
-  Accountant: ['matching.view', 'matching.run', 'matching.review', 'matching.rules', 'matching.parties'],
-  Viewer: ['matching.view'],
+  Accountant: ['matching.view', 'matching.run', 'matching.review', 'matching.rules', 'matching.parties', 'autofill.view', 'autofill.approve'],
+  Viewer: ['matching.view', 'autofill.view'],
 };
 
 let admin;

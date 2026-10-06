@@ -16,6 +16,7 @@ const TITLES = [
   ['/matching', 'Match review'],
   ['/matching/rules', 'Matching rules'],
   ['/matching/parties', 'Party ledgers'],
+  ['/matching/autofill', 'Auto-fill'],
   ['/help', 'Help & FAQ'],
 ];
 

@@ -233,6 +233,16 @@ const commands = {
     log(m
       ? `\nMatching: last run ${m.startedAt} UTC (${m.status})${m.po ? ` — ${m.po.linked} POs linked, ${m.po.review} need review, ${m.po.waiting} waiting for Tally` : ''}${m.error ? ` — ${m.error}` : ''}`
       : '\nMatching: not run yet');
+    const f = server.autofill;
+    if (f) {
+      const MODE = {
+        off: 'Off', preview: 'Preview', approve: 'Ask first', auto: 'Automatic',
+      };
+      const c = (f.last && f.last.counts) || {};
+      log(`Auto-fill: Bill No ${MODE[f.billMode] || f.billMode}, CN No ${MODE[f.cnMode] || f.cnMode}${f.last
+        ? ` — last round ${f.last.startedAt} UTC (${f.last.status}): ${c.written || 0} written, ${c.refused || 0} refused, ${c.checked || 0} checked${f.last.error ? ` — ${f.last.error}` : ''}`
+        : ' — nothing sent yet'}`);
+    }
   },
 
   async ping(args) {

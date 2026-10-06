@@ -62,6 +62,7 @@ app.use('/api/companies',  require('./src/routes/companies.routes'));
 app.use('/api/sync',       require('./src/routes/sync.routes'));
 app.use('/api/settings',   require('./src/routes/settings.routes'));
 app.use('/api/matching',   require('./src/routes/matching.routes'));
+app.use('/api/autofill',   require('./src/routes/autofill.routes'));
 app.use('/api/agent',      require('./src/routes/agent.routes'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

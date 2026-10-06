@@ -1,9 +1,50 @@
 const http = require('http');
 
-// A stand-in for ROMS's /api/integration/refs (ROMS integration.controller.js):
-// the same paging and the same bearer-token check, serving `data` -- which a
-// test may change between calls. `calls` lists the paths asked for.
+// A stand-in for ROMS's /api/integration (ROMS integration.controller.js):
+//   GET  /refs/:resource   the same paging and bearer-token check, serving
+//                          `data` -- which a test may change between calls
+//   POST /autofill         ROMS's rules for the two fields RAMS writes, on the
+//                          same `data`: compare-and-set on `expected`, "Already
+//                          set", a Bill No used on another PO, a deleted PO, a
+//                          DN - Disposed RTV row, and dry_run. A test can make
+//                          ROMS refuse a PO with state.refuse[po_id] = reason.
+// `calls` lists the paths asked for, `autofills` each auto-fill body.
 const ROMS_TOKEN = 'roms-test-token';
+
+const blank = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+const changed = (field, now, expected) => `${field} is now ${now == null ? 'blank' : `"${now}"`}, not ${expected == null ? 'blank' : `"${expected}"`} as RAMS read it — left for a person`;
+
+function autofillOne(data, item, dryRun, refuse) {
+  const value = blank(item.value);
+  const expected = blank(item.expected);
+  if (!value || !item.date) return { result: 'rejected', reason: 'value is required' };
+  if (refuse[item.po_id]) return { result: 'rejected', reason: refuse[item.po_id] };
+  if (item.target === 'bill') {
+    const p = data.pos.find((x) => x.po_id === item.po_id);
+    if (!p) return { result: 'rejected', reason: 'PO not found' };
+    if (p.status === 'Deleted') return { result: 'rejected', reason: 'PO is deleted' };
+    if (p.bill_no === value && p.bill_date === item.date) return { result: 'skipped', reason: 'Already set' };
+    if (blank(p.bill_no) !== expected) return { result: 'rejected', reason: changed('Bill no', blank(p.bill_no), expected) };
+    const dup = data.pos.find((x) => x.po_id !== p.po_id && x.bill_no === value);
+    if (dup) return { result: 'rejected', reason: `Bill no "${value}" is already used on PO ${dup.po_id}` };
+    const change = { old: blank(p.bill_no), new: value };
+    if (dryRun) return { result: 'would_apply', ...change };
+    Object.assign(p, { bill_no: value, bill_date: item.date, updated_at: '2026-10-06 10:00:00' });
+    return { result: 'applied', ...change };
+  }
+  if (item.target === 'rtv_cn') {
+    const r = data.rtv.find((x) => x.po_id === item.po_id);
+    if (!r) return { result: 'rejected', reason: 'No RTV row for this PO' };
+    if (r.status === 'DN - Disposed') return { result: 'rejected', reason: `RTV ${r.rtv_no} is DN - Disposed — no credit note follows` };
+    if (r.cn_number === value && r.cn_date === item.date) return { result: 'skipped', reason: 'Already set' };
+    if (blank(r.cn_number) !== expected) return { result: 'rejected', reason: changed('Credit Note Number', blank(r.cn_number), expected) };
+    const change = { old: blank(r.cn_number), new: value };
+    if (dryRun) return { result: 'would_apply', ...change };
+    Object.assign(r, { cn_number: value, cn_date: item.date, updated_at: '2026-10-06 10:00:00' });
+    return { result: 'applied', ...change };
+  }
+  return { result: 'rejected', reason: 'target must be one of bill, rtv_cn' };
+}
 
 function emptyRefs() {
   return { vendors: [], products: [], 'vendor-codes': [], pos: [], lines: [], rtv: [] };
@@ -11,16 +52,30 @@ function emptyRefs() {
 
 async function startFakeRoms(data = emptyRefs(), { token = ROMS_TOKEN } = {}) {
   const calls = [];
-  const state = { data, status: null };
-  const server = http.createServer((req, res) => {
+  const autofills = [];
+  const state = { data, status: null, refuse: {} };
+  const server = http.createServer(async (req, res) => {
     calls.push(req.url);
     const send = (status, body) => {
       res.writeHead(status, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(body));
     };
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
     if (state.status) return send(state.status, { message: 'The integration is not configured' });
     if (req.headers.authorization !== `Bearer ${token}`) return send(401, { message: 'Invalid integration token' });
     const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'POST' && url.pathname === '/api/integration/autofill') {
+      const body = JSON.parse(raw || '{}');
+      autofills.push(body);
+      const results = (body.items || []).map((item, index) => ({
+        index, target: item.target, po_id: item.po_id, ...autofillOne(state.data, item, Boolean(body.dry_run), state.refuse),
+      }));
+      const count = (r) => results.filter((x) => x.result === r).length;
+      return send(200, {
+        dry_run: Boolean(body.dry_run), applied: count('applied'), would_apply: count('would_apply'), skipped: count('skipped'), rejected: count('rejected'), results,
+      });
+    }
     const m = /^\/api\/integration\/refs\/([a-z-]+)$/.exec(url.pathname);
     if (!m || !state.data[m[1]]) return send(404, { message: 'Unknown reference' });
     const all = state.data[m[1]];
@@ -34,6 +89,7 @@ async function startFakeRoms(data = emptyRefs(), { token = ROMS_TOKEN } = {}) {
     url,
     token,
     calls,
+    autofills,
     state,
     settings: { url, token, configured: true },
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }),

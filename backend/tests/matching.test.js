@@ -165,6 +165,21 @@ describe('running a match', () => {
     const after = await agentPost(agent.token, '/heartbeat', {});
     expect(after.body.commands.filter((c) => c.why === 'Tally changed since the last match')).toEqual([]);
   });
+
+  test('a sync that finishes in the same second a match started still makes the next match due', async () => {
+    const changed = (hb) => hb.body.commands.filter((c) => c.why === 'Tally changed since the last match');
+    const at = '2026-10-06 10:00:00';
+    const { rows: [{ mark }] } = await db.execute("SELECT COALESCE(MAX(id), 0) AS mark FROM tally_sync_runs WHERE status <> 'running'");
+    await db.execute({ sql: "INSERT INTO match_runs (trigger, status, started_at, finished_at, sync_mark) VALUES ('cli', 'ok', ?, ?, ?)", args: [at, at, mark] });
+    expect(changed(await agentPost(agent.token, '/heartbeat', {}))).toEqual([]);
+    await db.execute({
+      sql: "INSERT INTO tally_sync_runs (company_id, kind, status, vouchers_upserted, started_at, finished_at) VALUES (?, 'light', 'ok', 1, ?, ?)",
+      args: [company.id, at, at],
+    });
+    expect(changed(await agentPost(agent.token, '/heartbeat', {}))).toHaveLength(1);
+    expect((await agentPost(agent.token, '/match', {})).status).toBe(200);
+    expect(changed(await agentPost(agent.token, '/heartbeat', {}))).toEqual([]);
+  });
 });
 
 describe('people decide', () => {
@@ -299,10 +314,11 @@ describe('who can do what', () => {
     expect((await post(viewer.token, '/party-ledgers/accept-suggestions')).status).toBe(403);
 
     const perms = (roles) => bearer(request(app).put('/api/settings/permissions'), admin.token).send({ roles });
+    const before = (await bearer(request(app).get('/api/settings/permissions'), admin.token)).body.matrix.Viewer;
     await perms({ Viewer: [] });
     expect((await get(viewer.token, '/summary')).status).toBe(403);
     await perms({ Viewer: ['matching.view', 'matching.review'] });
     expect((await post(viewer.token, '/results/po/MT3/undo')).status).toBe(200);
-    await perms({ Viewer: ['matching.view'] });
+    await perms({ Viewer: before });
   });
 });

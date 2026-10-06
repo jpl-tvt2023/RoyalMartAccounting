@@ -2,7 +2,10 @@
 
 Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes to it**. Every request is an `Export`. It does two jobs:
 - **Sync (M3):** keeps RAMS's copy of the Tally books current. It runs a light sync hourly in office hours, an end-of-day check, and a backfill from ROMS go-live.
-- **Starting matching (M5):** RAMS on Vercel has no clock of its own, so when a heartbeat reply asks for a match (`commands: [{ type: 'match' }]`), the Connector calls `POST /api/agent/match`. RAMS then reads ROMS and matches. The Connector itself never talks to ROMS.
+- **Starting matching (M5) and auto-fill (M6):** RAMS on Vercel has no clock of its own.
+  - When a heartbeat reply asks for a match (`commands: [{ type: 'match' }]`), the Connector calls `POST /api/agent/match`, and RAMS reads ROMS and matches.
+  - When it asks for auto-fill (`{ type: 'autofill' }`, or the match answers `autofill_due`), the Connector calls `POST /api/agent/autofill` again while RAMS answers `more`, up to 20 rounds a cycle. RAMS writes into ROMS by each field's mode.
+  - The Connector itself never talks to ROMS.
 - **Phase 0 probe:** one-off analysis, described further down.
 
 ## Sync (M3)
@@ -20,10 +23,10 @@ Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes t
 
 | Command | What it does |
 |---|---|
-| `run` | The service. A heartbeat every minute, a light sync hourly in office hours, the end-of-day check after `heavyAfter`, and the backfill outside office hours. At the end of a cycle, a matching run when RAMS asks for one. Errors are logged and retried; it never exits on one. |
+| `run` | The service. A heartbeat every minute, a light sync hourly in office hours, the end-of-day check after `heavyAfter`, and the backfill outside office hours. At the end of a cycle, a matching run and then auto-fill rounds, when RAMS asks for them. Errors are logged and retried; it never exits on one. |
 | `sync [--company MH] [--kind light\|heavy\|backfill\|resync]` | One sync now, then exit. Without `--kind` it does what is due. |
 | `sync --dry-run [--from YYYY-MM-DD] [--out DIR]` | A backfill written to files instead of RAMS. Nothing is sent. |
-| `status` | What RAMS knows (watermarks, backfill) next to Tally's counters now, and the last matching run. |
+| `status` | What RAMS knows (watermarks, backfill) next to Tally's counters now, the last matching run, and each auto-fill mode with its last round. |
 
 ### How a sync works
 - **Light:**

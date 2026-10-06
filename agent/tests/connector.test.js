@@ -145,6 +145,13 @@ describe('RAMS API client', () => {
     expect(await api.match()).toEqual({ skipped: true, message: 'Matching is already running' });
   });
 
+  test('an auto-fill round already running in RAMS counts as started, not as an error', async () => {
+    const { calls, api } = make([reply(200, { ok: true, counts: { written: 3 }, more: false }), reply(409, { message: 'Auto-fill is already writing to ROMS' })]);
+    expect(await api.autofill()).toMatchObject({ ok: true, counts: { written: 3 } });
+    expect(calls[0].url).toBe('https://rams.example/api/agent/autofill');
+    expect(await api.autofill()).toEqual({ skipped: true, message: 'Auto-fill is already writing to ROMS' });
+  });
+
   test('needs an address and a token', () => {
     expect(() => createApiClient({ apiUrl: '', token: 'x' })).toThrow(/No RAMS address/);
     expect(() => createApiClient({ apiUrl: 'https://x', token: '' })).toThrow(/No Connector token/);
@@ -292,5 +299,52 @@ describe('sync --dry-run', () => {
       server.close();
       server.closeAllConnections();
     }
+  });
+});
+
+describe('auto-fill rounds', () => {
+  // eslint-disable-next-line global-require
+  const { createService } = require('../src/run');
+  const serviceWith = (answers) => {
+    const lines = [];
+    const errors = [];
+    const log = Object.assign((m) => lines.push(m), { error: (m) => errors.push(m) });
+    const api = { calls: 0, async autofill() { api.calls += 1; return answers.shift(); } };
+    const service = createService({ cfg: { heartbeatSeconds: 60 }, tally: {}, api, log });
+    service.state.server = { commands: [{ type: 'autofill', why: '600 to write into ROMS' }] };
+    return { service, api, lines, errors };
+  };
+
+  test('asks again while RAMS says there is more, then reports the totals once', async () => {
+    const { service, api, lines } = serviceWith([
+      { ok: true, counts: { written: 25, refused: 1, checked: 0 }, remaining: 50, more: true },
+      { ok: true, counts: { written: 25, refused: 0, checked: 0 }, remaining: 25, more: true },
+      { ok: true, counts: { written: 24, refused: 1, checked: 0 }, remaining: 0, more: false },
+    ]);
+    const out = await service.autofill();
+    expect(api.calls).toBe(3);
+    expect(out).toMatchObject({ written: 74, refused: 2 });
+    expect(lines).toEqual(['Auto-fill (600 to write into ROMS): 74 written into ROMS, 2 refused, 0 checked']);
+    expect(service.state.server.commands).toEqual([]);
+    expect(service.state.activity).toEqual({ state: 'idle' });
+  });
+
+  test('stops at the cap per cycle, and reports what is left', async () => {
+    const more = () => ({ ok: true, counts: { written: 25 }, remaining: 100, more: true });
+    const { service, api, lines } = serviceWith([more(), more(), more()]);
+    await service.autofill({ maxRounds: 2 });
+    expect(api.calls).toBe(2);
+    expect(lines[0]).toMatch(/50 written into ROMS, 0 refused, 0 checked, 100 to go$/);
+  });
+
+  test('ROMS down or RAMS busy is reported, and the next cycle tries again', async () => {
+    const down = serviceWith([{ ok: false, error: 'ROMS\'s integration is switched off: not configured', counts: {}, more: false }]);
+    await down.service.autofill();
+    expect(down.errors).toEqual(['RAMS: auto-fill stopped — ROMS\'s integration is switched off: not configured']);
+    expect(down.service.state.lastError).toMatch(/^RAMS: auto-fill stopped/);
+
+    const busy = serviceWith([{ skipped: true, message: 'Auto-fill is already writing to ROMS' }]);
+    await busy.service.autofill();
+    expect(busy.lines).toEqual(['Auto-fill: Auto-fill is already writing to ROMS']);
   });
 });
