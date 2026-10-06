@@ -159,6 +159,18 @@ describeIf('rams-connector run', () => {
     }
   });
 
+  test('Sync now in RAMS: the next cycle runs a light sync of that company, even when nothing is due', async () => {
+    const [company] = (await service.heartbeat()).companies;
+    await rams.db.execute({ sql: 'INSERT INTO sync_requests (company_id) VALUES (?)', args: [company.id] });
+    const before = await runsCount();
+    clock = new Date(clock.getTime() + 60000);
+    const results = await service.cycle();
+    expect(results.map((r) => r.kind)).toEqual(['light']);
+    expect(await runsCount()).toBe(before + 1);
+    expect(await rams.one('SELECT done_at, run_id FROM sync_requests ORDER BY id DESC LIMIT 1')).toMatchObject({ done_at: expect.any(String) });
+    expect(await service.cycle()).toEqual([]);
+  });
+
   test('when Tally stops answering, the heartbeat says so and nothing is synced', async () => {
     await mock.close();
     mock = null;

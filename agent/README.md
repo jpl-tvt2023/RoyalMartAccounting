@@ -6,6 +6,7 @@ Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes t
   - When a heartbeat reply asks for a match (`commands: [{ type: 'match' }]`), the Connector calls `POST /api/agent/match`, and RAMS reads ROMS and matches.
   - When it asks for auto-fill (`{ type: 'autofill' }`, or the match answers `autofill_due`), the Connector calls `POST /api/agent/autofill` again while RAMS answers `more`, up to 20 rounds a cycle. RAMS writes into ROMS by each field's mode.
   - The Connector itself never talks to ROMS.
+- **Sync now (M7):** a heartbeat command `{ type: 'sync', company_id }` makes that cycle run a light sync of the company, even outside office hours.
 - **Phase 0 probe:** one-off analysis, described further down.
 
 ## Sync (M3)
@@ -18,6 +19,17 @@ Reads TallyPrime over its local XML port (`127.0.0.1:9000`) and **never writes t
 3. **Introduce the companies.** Run `node src/cli.js status`. RAMS lists every company loaded in Tally, each with **sync off**.
 4. **Turn companies on.** An Admin or Owner turns on the ones to mirror in RAMS under **Admin → Tally companies**. Companies are created in Tally; RAMS only chooses which ones to sync.
 5. **Start it.** Run `node src/cli.js run` for the service, or `node src/cli.js sync` for one sync now.
+
+### Installing on the office PC (M8)
+
+1. `npm run package` builds `dist/rams-connector/` (production dependencies only, plus `rams-connector.cmd`).
+2. Copy that folder to the office PC. It needs Node 20+ installed there.
+3. On that PC, signed in as the user who runs Tally, run `install-service.ps1`:
+   - it copies the Connector to `C:\RAMS\Connector`
+   - it creates `%ProgramData%\RAMS\connector.json` from the template, for the token
+   - it adds the scheduled task **RAMS Connector**, which starts at sign-in and restarts if it stops
+
+`uninstall-service.ps1` removes the task. The step-by-step rollout is `docs/go-live.md`.
 
 ### Commands
 

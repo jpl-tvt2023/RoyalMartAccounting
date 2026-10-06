@@ -48,12 +48,24 @@ const CATALOG = [
     description: 'Each field\'s mode (Off, Preview, Ask first, Automatic) and which Bill Date is kept',
   },
   {
+    key: 'reports.view', area: 'Reports', label: 'See the reports',
+    description: 'Invoices, Credit & debit notes, Stock transfers, Receivables and Exceptions',
+  },
+  {
+    key: 'reports.settings', area: 'Reports', label: 'Change credit terms',
+    description: 'Each marketplace\'s credit days, the default, and how long before something is an exception',
+  },
+  {
     key: 'sync.companies', area: 'Tally sync', label: 'Turn company sync on or off',
     description: 'Choose which Tally companies RAMS syncs, and edit their short codes',
   },
   {
     key: 'sync.schedule', area: 'Tally sync', label: 'Change the sync schedule',
     description: 'Office days and hours, the light sync interval and the end-of-day check',
+  },
+  {
+    key: 'sync.run', area: 'Tally sync', label: 'Sync now',
+    description: 'Ask the Connector for a light sync of a company straight away, on Sync health',
   },
 ];
 

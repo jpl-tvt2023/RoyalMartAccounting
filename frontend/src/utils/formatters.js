@@ -30,3 +30,9 @@ export function formatDateTime(dateStr) {
   if (!d) return '—';
   return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: IST });
 }
+
+// Whole paise -> "₹1,29,883.95" (Indian grouping). null -> '—'.
+export function formatRupees(paise, { decimals = 2 } = {}) {
+  if (paise == null || Number.isNaN(Number(paise))) return '—';
+  return `₹${(Number(paise) / 100).toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}

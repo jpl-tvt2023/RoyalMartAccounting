@@ -123,6 +123,9 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
     await heartbeat();
     if (!state.server) return [];
     const results = [];
+    // "Sync now" from RAMS: a light sync of these companies this cycle, even
+    // outside office hours.
+    const asked = new Set((state.server.commands || []).filter((c) => c.type === 'sync').map((c) => c.company_id));
     for (const company of state.server.companies) {
       let live = state.live.find((c) => c.guid === company.guid);
       const ask = () => decide({
@@ -137,6 +140,9 @@ function createService({ cfg, tally, api, log = () => {}, now = () => new Date()
         decision = ask();
       }
       if (decision.checked) state.lastLight.set(company.guid, now());
+      if (!decision.kind && asked.has(company.id) && live && company.sync.backfillDone && !company.sync.needsResync) {
+        decision = { kind: 'light', reason: 'Sync now, asked in RAMS' };
+      }
       if (!decision.kind) continue;
 
       const label = company.code || company.name;
